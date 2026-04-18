@@ -393,5 +393,5 @@ Free for educational and research purposes
 ---
 
 **Phiên bản**: 1.0.0  
-**Ngày tạo**: 2024  
-**Tác giả**: HTTM Project Team
+**Ngày tạo**: 2026
+**Tác giả**: Nhóm 3
