@@ -22,18 +22,18 @@ export default function IoTControl() {
   
   const fetchDeviceStatus = async () => {
     try {
-      const response = await api.get('/api/devices/status');
+      const response = await api.get('/devices/status');
       setDevices(response.data.devices);
       setMqttConnected(response.data.mqtt_connected);
     } catch (error) {
       console.error('Error fetching device status:', error);
     }
   };
-  
+
   const controlFan = async (speed) => {
     setLoading(true);
     try {
-      const response = await api.post(`/api/devices/fan/control?speed=${speed}`);
+      const response = await api.post(`/devices/fan/control?speed=${speed}`);
       if (response.data.success) {
         setFanSpeed(speed);
         setMessage(`Quạt: ${speed}%`);
@@ -45,11 +45,11 @@ export default function IoTControl() {
       setLoading(false);
     }
   };
-  
+
   const controlDoor = async (open) => {
     setLoading(true);
     try {
-      const response = await api.post(`/api/devices/door/control?open=${open}`);
+      const response = await api.post(`/devices/door/control?open=${open}`);
       if (response.data.success) {
         setMessage(`Cửa: ${open ? 'Mở' : 'Đóng'}`);
         setTimeout(() => setMessage(''), 2000);
@@ -60,11 +60,11 @@ export default function IoTControl() {
       setLoading(false);
     }
   };
-  
+
   const controlLight = async (on) => {
     setLoading(true);
     try {
-      const response = await api.post(`/api/devices/light/control?on=${on}`);
+      const response = await api.post(`/devices/light/control?on=${on}`);
       if (response.data.success) {
         setMessage(`Đèn: ${on ? 'Bật' : 'Tắt'}`);
         setTimeout(() => setMessage(''), 2000);
@@ -75,11 +75,11 @@ export default function IoTControl() {
       setLoading(false);
     }
   };
-  
+
   const activateAutoControl = async () => {
     setLoading(true);
     try {
-      const response = await api.post('/api/devices/auto-control');
+      const response = await api.post('/devices/auto-control');
       if (response.data.status === 'activated') {
         setMessage(`Tự động: Mức ${Math.round(response.data.ventilation_level)}%`);
         setFanSpeed(response.data.ventilation_level);

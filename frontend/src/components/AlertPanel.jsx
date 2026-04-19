@@ -1,60 +1,64 @@
 import React from 'react';
 
+const ALERT_CONFIG = {
+  danger:  { border: 'border-l-red-500',    bg: 'bg-red-50',    icon: '🚨', badge: 'bg-red-100 text-red-700',    title: 'text-red-800',    body: 'text-red-600'    },
+  warning: { border: 'border-l-amber-400',  bg: 'bg-amber-50',  icon: '⚠️', badge: 'bg-amber-100 text-amber-700', title: 'text-amber-800',  body: 'text-amber-600'  },
+};
+
+const SkeletonAlert = () => (
+  <div className="card space-y-2">
+    <div className="skeleton h-3 w-1/3 rounded" />
+    <div className="skeleton h-4 w-2/3 rounded" />
+    <div className="skeleton h-3 w-1/4 rounded" />
+  </div>
+);
+
 const AlertPanel = ({ alerts, loading }) => {
   if (loading) {
     return (
-      <div className="card">
-        <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-          <div className="h-4 bg-gray-200 rounded"></div>
-        </div>
+      <div className="space-y-3">
+        <SkeletonAlert />
+        <SkeletonAlert />
       </div>
     );
   }
 
   if (!alerts || alerts.length === 0) {
     return (
-      <div className="card border-l-4 border-l-green-500 bg-green-50">
-        <div className="flex items-center space-x-4">
-          <div className="text-4xl">✅</div>
-          <div>
-            <h3 className="font-bold text-green-900">Môi trường ổn định</h3>
-            <p className="text-sm text-green-700">Tất cả các chỉ số đều trong phạm vi bình thường</p>
-          </div>
+      <div className="card border-l-4 border-l-emerald-500 bg-emerald-50 flex items-center gap-4">
+        <span className="text-3xl">✅</span>
+        <div>
+          <p className="font-semibold text-emerald-800">Môi trường ổn định</p>
+          <p className="text-sm text-emerald-600 mt-0.5">Tất cả chỉ số trong ngưỡng bình thường</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      {alerts.map((alert, index) => (
-        <div
-          key={index}
-          className={`card border-l-4 ${
-            alert.status === 'danger'
-              ? 'border-l-red-500 bg-red-50'
-              : 'border-l-yellow-500 bg-yellow-50'
-          }`}
-        >
-          <div className="flex items-start space-x-4">
-            <div className={`text-2xl ${alert.status === 'danger' ? '🔴' : '🟡'}`}>
-              {alert.status === 'danger' ? '🚨' : '⚠️'}
-            </div>
-            <div className="flex-1">
-              <h4 className={`font-bold ${alert.status === 'danger' ? 'text-red-900' : 'text-yellow-900'}`}>
-                {alert.parameter}
-              </h4>
-              <p className={`text-sm mt-1 ${alert.status === 'danger' ? 'text-red-700' : 'text-yellow-700'}`}>
-                {alert.message}
-              </p>
-              <div className="mt-2 text-xs text-gray-600">
-                Giá trị: {alert.value} {alert.unit}
+    <div className="space-y-2">
+      {alerts.map((alert, idx) => {
+        const cfg = ALERT_CONFIG[alert.status] ?? ALERT_CONFIG.warning;
+        return (
+          <div key={idx} className={`card border-l-4 ${cfg.border} ${cfg.bg} fade-in`}>
+            <div className="flex items-start gap-3">
+              <span className="text-xl shrink-0 mt-0.5">{cfg.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`font-semibold text-sm ${cfg.title}`}>{alert.parameter}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.badge}`}>
+                    {alert.status === 'danger' ? 'Nguy hiểm' : 'Cảnh báo'}
+                  </span>
+                </div>
+                <p className={`text-sm mt-1 ${cfg.body}`}>{alert.message}</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Giá trị: <span className="font-mono font-semibold">{alert.value} {alert.unit}</span>
+                </p>
               </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };

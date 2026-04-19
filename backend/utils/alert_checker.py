@@ -51,25 +51,25 @@ class AlertChecker:
     def get_status_color(cls, value: float, parameter: str) -> str:
         """Get status color based on parameter value"""
         thresholds = cls.THRESHOLDS.get(parameter, {})
-        
-        # Check danger zone
-        if "danger" in thresholds and thresholds["danger"]:
+
+        # Check danger first (most severe)
+        if thresholds.get("danger"):
             min_val, max_val = thresholds["danger"]
-            if min_val <= value <= max_val:
+            if value > min_val:
                 return "red"
-        
-        # Check warning zone
-        if "warning" in thresholds:
-            min_val, max_val = thresholds["warning"]
-            if min_val <= value <= max_val:
-                return "yellow"
-        
-        # Check normal zone
-        if "normal" in thresholds:
+
+        # Check normal range before warning to avoid false positives
+        if thresholds.get("normal"):
             min_val, max_val = thresholds["normal"]
             if min_val <= value <= max_val:
                 return "green"
-        
+
+        # Check warning zone
+        if thresholds.get("warning"):
+            min_val, max_val = thresholds["warning"]
+            if min_val <= value <= max_val:
+                return "yellow"
+
         return "green"
     
     @classmethod

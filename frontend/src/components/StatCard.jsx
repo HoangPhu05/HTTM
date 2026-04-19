@@ -1,38 +1,36 @@
 import React from 'react';
 
-const StatCard = ({ icon, title, value, unit, status, description }) => {
-  const getStatusColor = () => {
-    switch(status) {
-      case 'green': return 'border-l-4 border-l-green-500';
-      case 'yellow': return 'border-l-4 border-l-yellow-500';
-      case 'red': return 'border-l-4 border-l-red-500';
-      default: return 'border-l-4 border-l-blue-500';
-    }
-  };
+const STATUS_CONFIG = {
+  green:  { border: 'border-l-emerald-500', dot: 'bg-emerald-500', label: 'Bình thường', text: 'text-emerald-600' },
+  yellow: { border: 'border-l-amber-500',   dot: 'bg-amber-500',   label: 'Cảnh báo',   text: 'text-amber-600'   },
+  red:    { border: 'border-l-red-500',     dot: 'bg-red-500',     label: 'Nguy hiểm',  text: 'text-red-600'     },
+  default:{ border: 'border-l-blue-400',    dot: 'bg-blue-400',    label: '',            text: 'text-blue-600'    },
+};
 
-  const getStatusBgColor = () => {
-    switch(status) {
-      case 'green': return 'bg-green-50';
-      case 'yellow': return 'bg-yellow-50';
-      case 'red': return 'bg-red-50';
-      default: return 'bg-blue-50';
-    }
-  };
+const StatCard = ({ icon, title, value, unit, status, description }) => {
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.default;
 
   return (
-    <div className={`card ${getStatusColor()} ${getStatusBgColor()}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          <div className="text-sm text-gray-600 font-medium">{title}</div>
-          <div className="mt-2 flex items-baseline">
-            <span className="text-3xl font-bold text-gray-900">{value}</span>
-            <span className="ml-2 text-sm text-gray-600">{unit}</span>
+    <div className={`card border-l-4 ${cfg.border} fade-in`}>
+      <div className="flex items-start justify-between gap-2">
+        {/* Left: label + value */}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide truncate">{title}</p>
+          <div className="mt-1.5 flex items-baseline gap-1.5">
+            <span className="text-2xl font-bold text-slate-800 leading-none">{value}</span>
+            {unit && <span className="text-sm text-slate-500 leading-none">{unit}</span>}
           </div>
-          {description && (
-            <div className="mt-2 text-xs text-gray-500">{description}</div>
+          {description && <p className="mt-1.5 text-xs text-slate-400">{description}</p>}
+          {status && (
+            <div className={`mt-2 flex items-center gap-1 text-xs font-medium ${cfg.text}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+              {cfg.label}
+            </div>
           )}
         </div>
-        <div className="text-4xl ml-4">{icon}</div>
+
+        {/* Right: icon */}
+        <div className="text-3xl shrink-0 opacity-80">{icon}</div>
       </div>
     </div>
   );
