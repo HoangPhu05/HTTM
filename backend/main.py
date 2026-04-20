@@ -189,8 +189,12 @@ async def root():
 
 @app.get("/api/current-data")
 async def get_current_data():
-    """Get current environmental data with auto-control enabled"""
-    update_current_state(auto_control=True)
+    """Get current environmental data.
+    Auto-control chỉ gửi MQTT khi auto-loop đang bật (không phải manual mode).
+    """
+    # Chỉ gửi lệnh MQTT nếu auto-loop được bật (không phải manual mode)
+    should_auto = auto_loop_state["enabled"]
+    update_current_state(auto_control=should_auto)
     return {
         "data": current_state["current_data"],
         "control": current_state["control_output"],
