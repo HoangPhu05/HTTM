@@ -150,31 +150,29 @@ def update_current_state(auto_control: bool = False):
 
 def auto_control_devices(control_output: dict):
     """
-    Automatically control IoT devices based on fuzzy control output
-    
-    Args:
-        control_output: Output from fuzzy controller containing ventilation_level
+    Automatically control IoT devices based on fuzzy control output.
+
+    Logic:
+      - Fan speed  = ventilation_level (0-100%)
+      - Door open  = ventilation_level > 60  (can't ventilate with door closed)
+      - Light on   = occupancy_count > 0     (someone in room → light on)
     """
     try:
         ventilation_level = control_output.get("ventilation_level", 0)
-        
-        # Convert ventilation level (0-100) to fan speed
         fan_speed = int(ventilation_level)
-        
-        # Control fan
-        if fan_speed > 0:
-            iot_controller.control_fan(fan_speed)
-        else:
-            iot_controller.control_fan(0)
-        
-        # Open/close door based on ventilation need
-        # Open if ventilation level > 60 (High)
-        should_open = ventilation_level > 60
-        iot_controller.control_door(should_open)
-        
-        # Turn on light if occupancy > 0 and quality is poor
-        # (This would be based on actual occupancy and air quality)
-        
+
+        # 1. Quat: toc do = muc thong gio tu Fuzzy Logic
+        iot_controller.control_fan(fan_speed)
+
+        # 2. Cua: mo khi thong gio cao (> 60%), dong khi thap
+        should_open_door = ventilation_level > 60
+        iot_controller.control_door(should_open_door)
+
+        # 3. Den phong: bat khi co nguoi trong phong, tat khi trong
+        occupancy = current_state.get("current_data", {}).get("occupancy_count", 0)
+        should_light_on = occupancy > 0
+        iot_controller.control_light(should_light_on)
+
     except Exception as e:
         print(f"Error controlling devices: {str(e)}")
 
