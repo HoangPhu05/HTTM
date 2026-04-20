@@ -80,13 +80,15 @@ export default function IoTControl() {
     setTimeout(() => setToast(null), 2500);
   };
 
-  // Bật/tắt auto-loop trên backend
+  // Bật/tắt manual mode trên backend
   const toggleManual = async (val) => {
-    setManual(val);
     try {
-      await api.post(`/devices/auto-loop?enabled=${!val}&interval=5`);
-      notify(val ? 'Chế độ thủ công — auto-loop tạm dừng' : 'Chế độ tự động bật lại');
-    } catch { notify('Lỗi đổi chế độ', false); }
+      await api.post(`/devices/manual-mode?enabled=${val}`);
+      setManual(val);
+      notify(val ? 'Chế độ thủ công — MQTT bị khóa' : 'Chế độ tự động bật lại');
+    } catch {
+      notify('Lỗi đổi chế độ', false);
+    }
   };
 
   /* ── Fan ── */

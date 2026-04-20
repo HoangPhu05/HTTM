@@ -56,12 +56,13 @@ current_state = {
 
 # Auto-loop state
 auto_loop_state = {
-    "enabled": True,    # Tự động bật khi khởi động
-    "interval": 5,      # Giây giữa mỗi lần publish
-    "cycle_count": 0,   # Số lần đã chạy thành công
+    "enabled": True,       # Thread vẫn chạy để cập nhật data hiển thị
+    "manual_mode": False,  # True = KHÔNG gửi MQTT (user điều khiển tay)
+    "interval": 5,
+    "cycle_count": 0,
     "last_run": None,
-    "last_error": None, # Lỗi gần nhất (nếu có)
-    "task": None        # asyncio.Task reference
+    "last_error": None,
+    "task": None
 }
 
 
@@ -78,19 +79,21 @@ def _auto_loop_thread():
 
     while True:
         time.sleep(auto_loop_state["interval"])
-        if not auto_loop_state["enabled"]:
-            continue
         try:
-            update_current_state(auto_control=True)
+            # Luôn đọc data để dashboard cập nhật
+            # Chỉ gửi MQTT khi KHÔNG phải manual mode
+            send_mqtt = not auto_loop_state["manual_mode"]
+            update_current_state(auto_control=send_mqtt)
             auto_loop_state["cycle_count"] += 1
             auto_loop_state["last_run"] = datetime.now().isoformat()
             auto_loop_state["last_error"] = None
-            ctrl  = current_state.get("control_output") or {}
-            level = ctrl.get("ventilation_level", 0)
+            ctrl   = current_state.get("control_output") or {}
+            level  = ctrl.get("ventilation_level", 0)
             status = ctrl.get("fan_status", "?")
+            mode   = "MANUAL" if auto_loop_state["manual_mode"] else "AUTO"
             mqtt_ok = "OK" if iot_controller.is_connected() else "DISCONNECTED"
             print(
-                f"[AutoLoop] #{auto_loop_state['cycle_count']} "
+                f"[AutoLoop] #{auto_loop_state['cycle_count']} [{mode}] "
                 f"-> {level:.0f}% ({status}) | MQTT={mqtt_ok}",
                 flush=True
             )
@@ -189,12 +192,9 @@ async def root():
 
 @app.get("/api/current-data")
 async def get_current_data():
-    """Get current environmental data.
-    Auto-control chỉ gửi MQTT khi auto-loop đang bật (không phải manual mode).
-    """
-    # Chỉ gửi lệnh MQTT nếu auto-loop được bật (không phải manual mode)
-    should_auto = auto_loop_state["enabled"]
-    update_current_state(auto_control=should_auto)
+    """Get current data. Không gửi MQTT khi đang ở manual mode."""
+    send_mqtt = not auto_loop_state["manual_mode"]
+    update_current_state(auto_control=send_mqtt)
     return {
         "data": current_state["current_data"],
         "control": current_state["control_output"],
@@ -467,9 +467,10 @@ async def get_mqtt_info():
 
 @app.get("/api/devices/auto-loop")
 async def get_auto_loop_status():
-    """Xem trạng thái auto-loop (tự động publish MQTT)"""
+    """Xem trạng thái auto-loop"""
     return {
         "enabled":     auto_loop_state["enabled"],
+        "manual_mode": auto_loop_state["manual_mode"],
         "interval_s":  auto_loop_state["interval"],
         "cycle_count": auto_loop_state["cycle_count"],
         "last_run":    auto_loop_state["last_run"],
@@ -478,19 +479,37 @@ async def get_auto_loop_status():
     }
 
 
+@app.post("/api/devices/manual-mode")
+async def set_manual_mode(
+    enabled: bool = Query(False, description="True = thủ công, False = tự động")
+):
+    """
+    Bật/tắt chế độ thủ công.
+    - True:  MQTT bị khóa, user điều khiển bằng tay
+    - False: Fuzzy Logic tự gửi lệnh mỗi 5s
+    """
+    auto_loop_state["manual_mode"] = enabled
+    mode = "MANUAL" if enabled else "AUTO"
+    print(f"[Mode] Switched to {mode}", flush=True)
+    return {
+        "status": "ok",
+        "manual_mode": enabled,
+        "mode": mode,
+    }
+
+
 @app.post("/api/devices/auto-loop")
 async def set_auto_loop(
-    enabled: bool = Query(True, description="Bật/tắt auto-loop"),
-    interval: int = Query(5, ge=1, le=60, description="Giây giữa mỗi vòng lặp (1-60)")
+    enabled: bool = Query(True, description="Bật/tắt auto-loop thread"),
+    interval: int = Query(5, ge=1, le=60, description="Giây giữa mỗi vòng lặp")
 ):
-    """Bật/tắt hoặc thay đổi tốc độ auto-loop"""
+    """Điều chỉnh tốc độ auto-loop (không liên quan đến manual mode)"""
     auto_loop_state["enabled"]  = enabled
     auto_loop_state["interval"] = interval
     return {
         "status": "ok",
         "enabled":    enabled,
         "interval_s": interval,
-        "message": f"Auto-loop {'BẬT' if enabled else 'TẮT'}, interval={interval}s"
     }
 
 
