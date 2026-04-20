@@ -1,39 +1,41 @@
 import React from 'react';
 
-const STATUS_CONFIG = {
-  green:  { border: 'border-l-emerald-500', dot: 'bg-emerald-500', label: 'Bình thường', text: 'text-emerald-600' },
-  yellow: { border: 'border-l-amber-500',   dot: 'bg-amber-500',   label: 'Cảnh báo',   text: 'text-amber-600'   },
-  red:    { border: 'border-l-red-500',     dot: 'bg-red-500',     label: 'Nguy hiểm',  text: 'text-red-600'     },
-  default:{ border: 'border-l-blue-400',    dot: 'bg-blue-400',    label: '',            text: 'text-blue-600'    },
+const STATUS = {
+  green:   { bar: 'bg-emerald-500', dot: 'bg-emerald-500', text: 'text-emerald-700', label: 'Bình thường' },
+  yellow:  { bar: 'bg-amber-400',   dot: 'bg-amber-400',   text: 'text-amber-700',   label: 'Cảnh báo'   },
+  red:     { bar: 'bg-red-500',     dot: 'bg-red-500',     text: 'text-red-700',     label: 'Nguy hiểm'  },
+  default: { bar: 'bg-slate-300',   dot: 'bg-slate-400',   text: 'text-slate-500',   label: ''           },
 };
 
-const StatCard = ({ icon, title, value, unit, status, description }) => {
-  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.default;
+export default function StatCard({ title, value, unit, status, description }) {
+  const s = STATUS[status] ?? STATUS.default;
 
   return (
-    <div className={`card border-l-4 ${cfg.border} fade-in`}>
-      <div className="flex items-start justify-between gap-2">
-        {/* Left: label + value */}
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide truncate">{title}</p>
-          <div className="mt-1.5 flex items-baseline gap-1.5">
-            <span className="text-2xl font-bold text-slate-800 leading-none">{value}</span>
-            {unit && <span className="text-sm text-slate-500 leading-none">{unit}</span>}
-          </div>
-          {description && <p className="mt-1.5 text-xs text-slate-400">{description}</p>}
-          {status && (
-            <div className={`mt-2 flex items-center gap-1 text-xs font-medium ${cfg.text}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-              {cfg.label}
-            </div>
-          )}
-        </div>
+    <div className="card relative overflow-hidden group hover:shadow-card-md transition-shadow">
+      {/* Status stripe at top */}
+      {status && status !== 'default' && (
+        <div className={`absolute top-0 left-0 right-0 h-[3px] ${s.bar}`} />
+      )}
 
-        {/* Right: icon */}
-        <div className="text-3xl shrink-0 opacity-80">{icon}</div>
+      <p className="text-xs font-medium text-slate-500 mb-2 mt-0.5">{title}</p>
+
+      <div className="flex items-baseline gap-1.5 mb-3">
+        <span className="num text-[1.85rem] font-semibold text-slate-900 leading-none">
+          {value ?? '—'}
+        </span>
+        {unit && (
+          <span className="text-sm text-slate-400 leading-none">{unit}</span>
+        )}
       </div>
+
+      {status ? (
+        <div className={`flex items-center gap-1.5 ${s.text}`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
+          <span className="text-xs font-medium">{description || s.label}</span>
+        </div>
+      ) : description ? (
+        <p className="text-xs text-slate-400">{description}</p>
+      ) : null}
     </div>
   );
-};
-
-export default StatCard;
+}
