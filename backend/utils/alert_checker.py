@@ -55,7 +55,7 @@ class AlertChecker:
         # Check danger first (most severe)
         if thresholds.get("danger"):
             min_val, max_val = thresholds["danger"]
-            if value > min_val:
+            if value >= min_val:
                 return "red"
 
         # Check normal range before warning to avoid false positives
@@ -70,8 +70,8 @@ class AlertChecker:
             if min_val <= value <= max_val:
                 return "yellow"
 
-        return "green"
-    
+        return "yellow"
+
     @classmethod
     def check_parameter(cls, value: float, parameter: str) -> str:
         """Check single parameter and return status"""

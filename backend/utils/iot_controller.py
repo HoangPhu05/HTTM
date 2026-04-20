@@ -31,6 +31,7 @@ class IoTController:
         self.connected = False
         self.device_states = {
             "fan": False,
+            "fan_speed": 0,
             "door": False,
             "light": False
         }
@@ -86,13 +87,17 @@ class IoTController:
             topic = msg.topic
             logger.info(f"Received from {topic}: {payload}")
             
-            # Update device states
+            # Update device states from ESP32 status payloads
+            # Fan:   {"device":"fan","speed":int,"running":bool,"level":"..."}
+            # Door:  {"device":"door","open":bool}
+            # Light: {"device":"light","on":bool}
             if "fan" in topic:
-                self.device_states["fan"] = payload.get("status", False)
+                self.device_states["fan"] = payload.get("running", False)
+                self.device_states["fan_speed"] = payload.get("speed", 0)
             elif "door" in topic:
-                self.device_states["door"] = payload.get("status", False)
+                self.device_states["door"] = payload.get("open", False)
             elif "light" in topic:
-                self.device_states["light"] = payload.get("status", False)
+                self.device_states["light"] = payload.get("on", False)
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
     
@@ -144,6 +149,7 @@ class IoTController:
             success = self.send_command("fan", "off")
         if success:
             self.device_states["fan"] = speed > 0
+            self.device_states["fan_speed"] = speed
         return success
 
     def control_door(self, open_status: bool) -> bool:

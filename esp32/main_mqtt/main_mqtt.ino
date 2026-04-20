@@ -170,9 +170,9 @@ void handleFanCommand(const String& payload) {
     publishFanStatus(speed);
 
   } else if (strcmp(cmd, "on") == 0) {
-    currentFanSpeed = 50;
-    setVentilationLED(50);
-    publishFanStatus(50);
+    if (currentFanSpeed == 0) currentFanSpeed = 50;  // restore prev speed, default 50
+    setVentilationLED(currentFanSpeed);
+    publishFanStatus(currentFanSpeed);
 
   } else if (strcmp(cmd, "off") == 0) {
     currentFanSpeed = 0;
