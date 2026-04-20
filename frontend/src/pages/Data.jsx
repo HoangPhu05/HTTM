@@ -1,239 +1,204 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../services/api';
-import Header from '../components/Header';
+
+const COLUMNS = [
+  { key: 'timestamp',        label: 'Thời gian',       align: 'left',  fmt: v => v },
+  { key: 'temperature',      label: 'Nhiệt độ (°C)',   align: 'right', fmt: v => v.toFixed(1) },
+  { key: 'humidity',         label: 'Độ ẩm (%)',       align: 'right', fmt: v => v.toFixed(1) },
+  { key: 'co2',              label: 'CO2 (ppm)',        align: 'right', fmt: v => v.toFixed(0) },
+  { key: 'pm25',             label: 'PM2.5 (µg/m³)',   align: 'right', fmt: v => v.toFixed(1) },
+  { key: 'pm10',             label: 'PM10 (µg/m³)',    align: 'right', fmt: v => v.toFixed(1) },
+  { key: 'tvoc',             label: 'TVOC (ppb)',       align: 'right', fmt: v => v.toFixed(1) },
+  { key: 'co',               label: 'CO (ppm)',         align: 'right', fmt: v => v.toFixed(2) },
+  { key: 'occupancy_count',  label: 'Số người',         align: 'right', fmt: v => v },
+  { key: 'ventilation_status', label: 'Thông gió',     align: 'center', fmt: null },
+];
+
+const Pagination = ({ currentPage, totalPages, onPage }) => {
+  if (totalPages <= 1) return null;
+  const pages = [];
+  const delta = 2;
+  let last = 0;
+  for (let p = 1; p <= totalPages; p++) {
+    if (p === 1 || p === totalPages || (p >= currentPage - delta && p <= currentPage + delta)) {
+      if (last && p - last > 1) pages.push(<span key={`e${p}`} className="px-1 text-slate-400 text-sm">…</span>);
+      pages.push(
+        <button
+          key={p}
+          onClick={() => onPage(p)}
+          className={`w-8 h-8 rounded-lg text-sm font-medium transition-all ${
+            currentPage === p ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >{p}</button>
+      );
+      last = p;
+    }
+  }
+  return (
+    <div className="card flex items-center justify-between gap-2">
+      <button onClick={() => onPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+        className="btn btn-ghost border border-slate-200 text-sm disabled:opacity-40">◀ Trước</button>
+      <div className="flex items-center gap-1 flex-wrap justify-center">{pages}</div>
+      <button onClick={() => onPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+        className="btn btn-ghost border border-slate-200 text-sm disabled:opacity-40">Sau ▶</button>
+    </div>
+  );
+};
 
 const Data = () => {
-  const [data, setData] = useState([]);
+  const [data, setData]               = useState([]);
   const [filteredData, setFilteredData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [pageSize, setPageSize] = useState(20);
+  const [loading, setLoading]         = useState(true);
+  const [pageSize, setPageSize]       = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm]   = useState('');
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const response = await apiClient.getAllData();
-        setData(response.data.records || []);
-        setFilteredData(response.data.records || []);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
+    apiClient.getAllData()
+      .then(r => {
+        const records = r.data.records || [];
+        setData(records);
+        setFilteredData(records);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    let filtered = data;
-
-    if (searchTerm) {
-      filtered = data.filter(record => 
-        record.timestamp.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    setFilteredData(filtered);
+    const term = searchTerm.toLowerCase();
+    setFilteredData(term ? data.filter(r => r.timestamp.toLowerCase().includes(term)) : data);
     setCurrentPage(1);
   }, [searchTerm, data]);
 
-  // Pagination
-  const startIdx = (currentPage - 1) * pageSize;
-  const endIdx = startIdx + pageSize;
-  const paginatedData = filteredData.slice(startIdx, endIdx);
-  const totalPages = Math.ceil(filteredData.length / pageSize);
+  const startIdx      = (currentPage - 1) * pageSize;
+  const paginatedData = filteredData.slice(startIdx, startIdx + pageSize);
+  const totalPages    = Math.ceil(filteredData.length / pageSize);
 
-  const exportToCSV = () => {
-    const headers = ['Timestamp', 'Temperature', 'Humidity', 'CO2', 'PM2.5', 'PM10', 'TVOC', 'CO', 'Occupancy', 'Ventilation'];
-    const csvContent = [
-      headers.join(','),
-      ...filteredData.map(record =>
-        [
-          record.timestamp,
-          record.temperature.toFixed(2),
-          record.humidity.toFixed(2),
-          record.co2.toFixed(2),
-          record.pm25.toFixed(2),
-          record.pm10.toFixed(2),
-          record.tvoc.toFixed(2),
-          record.co.toFixed(2),
-          record.occupancy_count,
-          record.ventilation_status
-        ].join(',')
-      )
-    ].join('\n');
-
-    const element = document.createElement('a');
-    element.setAttribute('href', `data:text/csv;charset=utf-8,${encodeURIComponent(csvContent)}`);
-    element.setAttribute('download', `air-quality-data-${new Date().toISOString().slice(0, 10)}.csv`);
-    element.style.display = 'none';
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+  const exportCSV = () => {
+    const headers = COLUMNS.map(c => c.label);
+    const rows = filteredData.map(r =>
+      COLUMNS.map(c => {
+        const v = r[c.key];
+        return c.fmt ? c.fmt(v) : v;
+      }).join(',')
+    );
+    const csv = [headers.join(','), ...rows].join('\n');
+    const a = document.createElement('a');
+    a.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+    a.download = `air-quality-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-8">
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        <Header 
-          title="📋 Dữ liệu Chi tiết"
-          subtitle="Bảng dữ liệu đầy đủ từ hệ thống"
-        />
+    <div className="min-h-screen bg-slate-50 pb-10">
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
 
-        {/* Controls */}
-        <div className="card space-y-4">
-          <div className="flex flex-col md:flex-row gap-4 items-end">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                🔍 Tìm kiếm theo thời gian
-              </label>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-slate-800">Dữ liệu Chi tiết</h1>
+          <button onClick={exportCSV} className="btn btn-secondary text-sm">
+            ↓ Xuất CSV
+          </button>
+        </div>
+
+        {/* Toolbar */}
+        <div className="card">
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+            {/* Search */}
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
               <input
                 type="text"
-                placeholder="Nhập thời gian..."
+                placeholder="Tìm kiếm theo thời gian…"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
               />
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                📊 Dòng trên trang
-              </label>
+            {/* Page size */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs text-slate-500 whitespace-nowrap">Dòng/trang</span>
               <select
                 value={pageSize}
-                onChange={(e) => {
-                  setPageSize(parseInt(e.target.value));
-                  setCurrentPage(1);
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={e => { setPageSize(+e.target.value); setCurrentPage(1); }}
+                className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
               >
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
+                {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
-
-            <button
-              onClick={exportToCSV}
-              className="btn btn-secondary"
-            >
-              💾 Xuất CSV
-            </button>
           </div>
 
-          {/* Summary */}
-          <div className="grid grid-cols-3 gap-4 pt-4 border-t">
-            <div>
-              <div className="text-sm text-gray-600">Tổng bản ghi</div>
-              <div className="text-2xl font-bold text-blue-600">{data.length}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Bản ghi hiển thị</div>
-              <div className="text-2xl font-bold text-green-600">{filteredData.length}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Trang hiện tại</div>
-              <div className="text-2xl font-bold text-purple-600">{currentPage}/{totalPages}</div>
-            </div>
+          {/* Stats row */}
+          <div className="flex gap-6 mt-4 pt-3 border-t border-slate-100 text-sm">
+            <div><span className="text-slate-500">Tổng: </span><span className="font-bold text-slate-800">{data.length}</span></div>
+            <div><span className="text-slate-500">Lọc: </span><span className="font-bold text-blue-600">{filteredData.length}</span></div>
+            <div><span className="text-slate-500">Trang: </span><span className="font-bold text-slate-800">{currentPage}/{totalPages || 1}</span></div>
           </div>
         </div>
 
         {/* Table */}
         {loading ? (
-          <div className="card h-64 flex items-center justify-center">
-            <div className="animate-spin text-4xl">⏳</div>
+          <div className="card h-64 flex flex-col items-center justify-center gap-3 text-slate-400">
+            <div className="w-8 h-8 border-2 border-slate-200 border-t-blue-400 rounded-full animate-spin" />
+            <p className="text-sm">Đang tải dữ liệu…</p>
           </div>
         ) : paginatedData.length > 0 ? (
-          <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100 border-b-2 border-gray-300">
-                <tr>
-                  <th className="px-4 py-3 text-left font-bold">Thời gian</th>
-                  <th className="px-4 py-3 text-right font-bold">Nhiệt độ (°C)</th>
-                  <th className="px-4 py-3 text-right font-bold">Độ ẩm (%)</th>
-                  <th className="px-4 py-3 text-right font-bold">CO2 (ppm)</th>
-                  <th className="px-4 py-3 text-right font-bold">PM2.5 (µg/m³)</th>
-                  <th className="px-4 py-3 text-right font-bold">PM10 (µg/m³)</th>
-                  <th className="px-4 py-3 text-right font-bold">TVOC (ppb)</th>
-                  <th className="px-4 py-3 text-right font-bold">CO (ppm)</th>
-                  <th className="px-4 py-3 text-right font-bold">Số người</th>
-                  <th className="px-4 py-3 text-left font-bold">Trạng thái</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedData.map((record, idx) => (
-                  <tr
-                    key={idx}
-                    className={`border-b ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50`}
-                  >
-                    <td className="px-4 py-3 text-gray-800">{record.timestamp}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.temperature.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.humidity.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.co2.toFixed(0)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.pm25.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.pm10.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.tvoc.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.co.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{record.occupancy_count}</td>
-                    <td className="px-4 py-3 text-gray-800">
-                      <span className={`badge ${
-                        record.ventilation_status === 'Open' ? 'badge-success' : 'badge-warning'
-                      }`}>
-                        {record.ventilation_status}
-                      </span>
-                    </td>
+          <div className="card p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    {COLUMNS.map(c => (
+                      <th
+                        key={c.key}
+                        className={`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap ${
+                          c.align === 'right' ? 'text-right' : c.align === 'center' ? 'text-center' : 'text-left'
+                        }`}
+                      >
+                        {c.label}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {paginatedData.map((record, idx) => (
+                    <tr
+                      key={idx}
+                      className={`border-b border-slate-50 hover:bg-blue-50/40 transition-colors ${
+                        idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'
+                      }`}
+                    >
+                      {COLUMNS.map(c => (
+                        <td
+                          key={c.key}
+                          className={`px-4 py-2.5 ${
+                            c.align === 'right' ? 'text-right font-mono text-slate-700' :
+                            c.align === 'center' ? 'text-center' : 'text-slate-600'
+                          }`}
+                        >
+                          {c.key === 'ventilation_status' ? (
+                            <span className={`badge ${
+                              record.ventilation_status === 'Open' ? 'badge-success' : 'badge-neutral'
+                            }`}>
+                              {record.ventilation_status}
+                            </span>
+                          ) : c.fmt ? c.fmt(record[c.key]) : record[c.key]}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
-          <div className="card h-64 flex items-center justify-center">
-            <p className="text-gray-500">Không tìm thấy dữ liệu</p>
+          <div className="card h-48 flex items-center justify-center text-slate-400 text-sm">
+            Không tìm thấy dữ liệu phù hợp
           </div>
         )}
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="card flex justify-between items-center">
-            <button
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className={`btn ${currentPage === 1 ? 'bg-gray-300 text-gray-500' : 'btn-primary'}`}
-            >
-              ◀️ Trước
-            </button>
+        <Pagination currentPage={currentPage} totalPages={totalPages} onPage={setCurrentPage} />
 
-            <div className="space-x-2">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-2 rounded-lg font-medium transition-all ${
-                    currentPage === page
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className={`btn ${currentPage === totalPages ? 'bg-gray-300 text-gray-500' : 'btn-primary'}`}
-            >
-              Sau ▶️
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ Manages connection to smart devices and sends control commands
 import paho.mqtt.client as mqtt
 import json
 import logging
+from datetime import datetime
 from typing import Dict, Optional
 import threading
 
@@ -30,6 +31,7 @@ class IoTController:
         self.connected = False
         self.device_states = {
             "fan": False,
+            "fan_speed": 0,
             "door": False,
             "light": False
         }
@@ -85,13 +87,17 @@ class IoTController:
             topic = msg.topic
             logger.info(f"Received from {topic}: {payload}")
             
-            # Update device states
+            # Update device states from ESP32 status payloads
+            # Fan:   {"device":"fan","speed":int,"running":bool,"level":"..."}
+            # Door:  {"device":"door","open":bool}
+            # Light: {"device":"light","on":bool}
             if "fan" in topic:
-                self.device_states["fan"] = payload.get("status", False)
+                self.device_states["fan"] = payload.get("running", False)
+                self.device_states["fan_speed"] = payload.get("speed", 0)
             elif "door" in topic:
-                self.device_states["door"] = payload.get("status", False)
+                self.device_states["door"] = payload.get("open", False)
             elif "light" in topic:
-                self.device_states["light"] = payload.get("status", False)
+                self.device_states["light"] = payload.get("on", False)
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
     
@@ -117,7 +123,7 @@ class IoTController:
                 "device": device,
                 "command": command,
                 "value": value,
-                "timestamp": str(__import__('datetime').datetime.now())
+                "timestamp": datetime.now().isoformat()
             }
             
             self.client.publish(topic, json.dumps(payload), qos=1)
@@ -130,47 +136,53 @@ class IoTController:
     def control_fan(self, speed: int) -> bool:
         """
         Control fan speed
-        
+
         Args:
             speed: Fan speed 0-100 (0=off, 100=max)
-        
+
         Returns:
             bool: Success status
         """
         if speed > 0:
-            self.device_states["fan"] = True
-            return self.send_command("fan", "set_speed", speed)
+            success = self.send_command("fan", "set_speed", speed)
         else:
-            self.device_states["fan"] = False
-            return self.send_command("fan", "off")
-    
+            success = self.send_command("fan", "off")
+        if success:
+            self.device_states["fan"] = speed > 0
+            self.device_states["fan_speed"] = speed
+        return success
+
     def control_door(self, open_status: bool) -> bool:
         """
         Control door lock
-        
+
         Args:
             open_status: True to open, False to close
-        
+
         Returns:
             bool: Success status
         """
-        self.device_states["door"] = open_status
         command = "open" if open_status else "close"
-        return self.send_command("door", command)
-    
+        success = self.send_command("door", command)
+        if success:
+            self.device_states["door"] = open_status
+        return success
+
     def control_light(self, on: bool) -> bool:
         """
         Control light
-        
+
         Args:
             on: True to turn on, False to turn off
-        
+
         Returns:
             bool: Success status
         """
-        self.device_states["light"] = on
         command = "on" if on else "off"
-        return self.send_command("light", command)
+        success = self.send_command("light", command)
+        if success:
+            self.device_states["light"] = on
+        return success
     
     def get_device_states(self) -> Dict[str, bool]:
         """Get current device states"""

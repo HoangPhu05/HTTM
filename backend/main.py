@@ -4,6 +4,8 @@ Main FastAPI Application for Air Quality Monitoring System with IoT Control
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+import threading
 import os
 import sys
 from datetime import datetime, timedelta
@@ -52,14 +54,66 @@ current_state = {
     "last_update": None
 }
 
+# Auto-loop state
+auto_loop_state = {
+    "enabled": True,       # Thread vẫn chạy để cập nhật data hiển thị
+    "manual_mode": False,  # True = KHÔNG gửi MQTT (user điều khiển tay)
+    "interval": 5,
+    "cycle_count": 0,
+    "last_run": None,
+    "last_error": None,
+    "task": None
+}
+
+
+def _auto_loop_thread():
+    """
+    Background THREAD: reads CSV rows, runs Fuzzy Logic,
+    publishes MQTT command to ESP32 every N seconds.
+    Uses threading.Thread to be independent of the asyncio event loop.
+    ASCII-only prints to avoid Windows CP1252 encoding errors.
+    """
+    import time
+    global auto_loop_state
+    print(f"[AutoLoop] Thread started - interval={auto_loop_state['interval']}s", flush=True)
+
+    while True:
+        time.sleep(auto_loop_state["interval"])
+        try:
+            # Luôn đọc data để dashboard cập nhật
+            # Chỉ gửi MQTT khi KHÔNG phải manual mode
+            send_mqtt = not auto_loop_state["manual_mode"]
+            update_current_state(auto_control=send_mqtt)
+            auto_loop_state["cycle_count"] += 1
+            auto_loop_state["last_run"] = datetime.now().isoformat()
+            auto_loop_state["last_error"] = None
+            ctrl   = current_state.get("control_output") or {}
+            level  = ctrl.get("ventilation_level", 0)
+            status = ctrl.get("fan_status", "?")
+            mode   = "MANUAL" if auto_loop_state["manual_mode"] else "AUTO"
+            mqtt_ok = "OK" if iot_controller.is_connected() else "DISCONNECTED"
+            print(
+                f"[AutoLoop] #{auto_loop_state['cycle_count']} [{mode}] "
+                f"-> {level:.0f}% ({status}) | MQTT={mqtt_ok}",
+                flush=True
+            )
+        except Exception as exc:
+            auto_loop_state["last_error"] = str(exc)
+            print(f"[AutoLoop] Error: {exc}", flush=True)
+
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
-    global current_state
-    print("Air Quality Monitoring System started")
+    global current_state, auto_loop_state
+    print("Air Quality Monitoring System started", flush=True)
     # Get initial data
     update_current_state()
+    # Start background thread (daemon=True so it exits when server stops)
+    t = threading.Thread(target=_auto_loop_thread, daemon=True, name="AutoLoop")
+    t.start()
+    auto_loop_state["task"] = t
+    print(f"[AutoLoop] Background thread launched (alive={t.is_alive()})", flush=True)
 
 
 def update_current_state(auto_control: bool = False):
@@ -99,31 +153,30 @@ def update_current_state(auto_control: bool = False):
 
 def auto_control_devices(control_output: dict):
     """
-    Automatically control IoT devices based on fuzzy control output
-    
-    Args:
-        control_output: Output from fuzzy controller containing ventilation_level
+    Automatically control IoT devices based on fuzzy control output.
+
+    Logic:
+      - Fan   : speed = ventilation_level (0-100%)
+      - Door  : open only when CO2 > 1000 ppm (DANGER level needs fresh air)
+      - Light : on when occupancy_count > 0 (someone in room)
     """
     try:
         ventilation_level = control_output.get("ventilation_level", 0)
-        
-        # Convert ventilation level (0-100) to fan speed
-        fan_speed = int(ventilation_level)
-        
-        # Control fan
-        if fan_speed > 0:
-            iot_controller.control_fan(fan_speed)
-        else:
-            iot_controller.control_fan(0)
-        
-        # Open/close door based on ventilation need
-        # Open if ventilation level > 60 (High)
-        should_open = ventilation_level > 60
-        iot_controller.control_door(should_open)
-        
-        # Turn on light if occupancy > 0 and quality is poor
-        # (This would be based on actual occupancy and air quality)
-        
+        data = current_state.get("current_data", {})
+        co2  = data.get("co2", 0)
+        occupancy = data.get("occupancy_count", 0)
+
+        # 1. Quat: toc do = muc thong gio tu Fuzzy Logic
+        iot_controller.control_fan(int(ventilation_level))
+
+        # 2. Cua: chi mo khi CO2 vuot nguong nguy hiem (> 1000 ppm)
+        #    Tang nguong de khong mo lien tuc khi luon co nhieu nguoi
+        should_open_door = co2 > 1000
+        iot_controller.control_door(should_open_door)
+
+        # 3. Den phong: bat khi co nguoi trong phong
+        iot_controller.control_light(occupancy > 0)
+
     except Exception as e:
         print(f"Error controlling devices: {str(e)}")
 
@@ -140,8 +193,9 @@ async def root():
 
 @app.get("/api/current-data")
 async def get_current_data():
-    """Get current environmental data with auto-control enabled"""
-    update_current_state(auto_control=True)
+    """Get current data. Không gửi MQTT khi đang ở manual mode."""
+    send_mqtt = not auto_loop_state["manual_mode"]
+    update_current_state(auto_control=send_mqtt)
     return {
         "data": current_state["current_data"],
         "control": current_state["control_output"],
@@ -409,6 +463,54 @@ async def get_mqtt_info():
                 "4. Sử dụng các endpoint này để gửi lệnh"
             ]
         }
+    }
+
+
+@app.get("/api/devices/auto-loop")
+async def get_auto_loop_status():
+    """Xem trạng thái auto-loop"""
+    return {
+        "enabled":     auto_loop_state["enabled"],
+        "manual_mode": auto_loop_state["manual_mode"],
+        "interval_s":  auto_loop_state["interval"],
+        "cycle_count": auto_loop_state["cycle_count"],
+        "last_run":    auto_loop_state["last_run"],
+        "last_error":  auto_loop_state["last_error"],
+        "mqtt_connected": iot_controller.is_connected(),
+    }
+
+
+@app.post("/api/devices/manual-mode")
+async def set_manual_mode(
+    enabled: bool = Query(False, description="True = thủ công, False = tự động")
+):
+    """
+    Bật/tắt chế độ thủ công.
+    - True:  MQTT bị khóa, user điều khiển bằng tay
+    - False: Fuzzy Logic tự gửi lệnh mỗi 5s
+    """
+    auto_loop_state["manual_mode"] = enabled
+    mode = "MANUAL" if enabled else "AUTO"
+    print(f"[Mode] Switched to {mode}", flush=True)
+    return {
+        "status": "ok",
+        "manual_mode": enabled,
+        "mode": mode,
+    }
+
+
+@app.post("/api/devices/auto-loop")
+async def set_auto_loop(
+    enabled: bool = Query(True, description="Bật/tắt auto-loop thread"),
+    interval: int = Query(5, ge=1, le=60, description="Giây giữa mỗi vòng lặp")
+):
+    """Điều chỉnh tốc độ auto-loop (không liên quan đến manual mode)"""
+    auto_loop_state["enabled"]  = enabled
+    auto_loop_state["interval"] = interval
+    return {
+        "status": "ok",
+        "enabled":    enabled,
+        "interval_s": interval,
     }
 
 
