@@ -5,6 +5,7 @@ Main FastAPI Application for Air Quality Monitoring System with IoT Control
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
+import threading
 import os
 import sys
 from datetime import datetime, timedelta
@@ -57,50 +58,59 @@ current_state = {
 auto_loop_state = {
     "enabled": True,    # Tự động bật khi khởi động
     "interval": 5,      # Giây giữa mỗi lần publish
-    "cycle_count": 0,   # Số lần đã chạy
+    "cycle_count": 0,   # Số lần đã chạy thành công
     "last_run": None,
+    "last_error": None, # Lỗi gần nhất (nếu có)
     "task": None        # asyncio.Task reference
 }
 
 
-async def _auto_loop_task():
+def _auto_loop_thread():
     """
-    Background task: đọc từng dòng CSV, chạy Fuzzy Logic,
-    publish MQTT command đến ESP32 mỗi N giây.
+    Background THREAD: reads CSV rows, runs Fuzzy Logic,
+    publishes MQTT command to ESP32 every N seconds.
+    Uses threading.Thread to be independent of the asyncio event loop.
+    ASCII-only prints to avoid Windows CP1252 encoding errors.
     """
+    import time
     global auto_loop_state
-    print(f"[AutoLoop] Bắt đầu — interval={auto_loop_state['interval']}s")
+    print(f"[AutoLoop] Thread started - interval={auto_loop_state['interval']}s", flush=True)
 
     while True:
+        time.sleep(auto_loop_state["interval"])
+        if not auto_loop_state["enabled"]:
+            continue
         try:
-            if auto_loop_state["enabled"]:
-                update_current_state(auto_control=True)
-                auto_loop_state["cycle_count"] += 1
-                auto_loop_state["last_run"] = datetime.now().isoformat()
-                ctrl = current_state.get("control_output") or {}
-                level = ctrl.get("ventilation_level", 0)
-                status = ctrl.get("fan_status", "?")
-                print(
-                    f"[AutoLoop] #{auto_loop_state['cycle_count']} "
-                    f"→ {level:.0f}% ({status}) "
-                    f"| MQTT: {'✓' if iot_controller.is_connected() else '✗'}"
-                )
+            update_current_state(auto_control=True)
+            auto_loop_state["cycle_count"] += 1
+            auto_loop_state["last_run"] = datetime.now().isoformat()
+            auto_loop_state["last_error"] = None
+            ctrl  = current_state.get("control_output") or {}
+            level = ctrl.get("ventilation_level", 0)
+            status = ctrl.get("fan_status", "?")
+            mqtt_ok = "OK" if iot_controller.is_connected() else "DISCONNECTED"
+            print(
+                f"[AutoLoop] #{auto_loop_state['cycle_count']} "
+                f"-> {level:.0f}% ({status}) | MQTT={mqtt_ok}",
+                flush=True
+            )
         except Exception as exc:
-            print(f"[AutoLoop] Lỗi: {exc}")
-
-        await asyncio.sleep(auto_loop_state["interval"])
+            auto_loop_state["last_error"] = str(exc)
+            print(f"[AutoLoop] Error: {exc}", flush=True)
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
     global current_state, auto_loop_state
-    print("Air Quality Monitoring System started")
+    print("Air Quality Monitoring System started", flush=True)
     # Get initial data
     update_current_state()
-    # Start background loop
-    task = asyncio.create_task(_auto_loop_task())
-    auto_loop_state["task"] = task
+    # Start background thread (daemon=True so it exits when server stops)
+    t = threading.Thread(target=_auto_loop_thread, daemon=True, name="AutoLoop")
+    t.start()
+    auto_loop_state["task"] = t
+    print(f"[AutoLoop] Background thread launched (alive={t.is_alive()})", flush=True)
 
 
 def update_current_state(auto_control: bool = False):
@@ -461,6 +471,7 @@ async def get_auto_loop_status():
         "interval_s":  auto_loop_state["interval"],
         "cycle_count": auto_loop_state["cycle_count"],
         "last_run":    auto_loop_state["last_run"],
+        "last_error":  auto_loop_state["last_error"],
         "mqtt_connected": iot_controller.is_connected(),
     }
 
