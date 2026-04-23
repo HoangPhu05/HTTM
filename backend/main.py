@@ -1,9 +1,12 @@
 """
 Main FastAPI Application for Air Quality Monitoring System with IoT Control
+Now with Time Series Prediction and Hybrid Fuzzy Logic Control
 """
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+import threading
 import os
 import sys
 from datetime import datetime, timedelta
@@ -13,14 +16,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from services.data_service import DataService
 from fuzzy.fuzzy_controller import FuzzyController
+from fuzzy.hybrid_controller import HybridFuzzyController
 from utils.alert_checker import AlertChecker
 from utils.iot_controller import get_iot_controller
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Air Quality Monitoring System",
-    description="Real-time air quality monitoring with Fuzzy Logic Control",
-    version="1.0.0"
+    title="Air Quality Monitoring System v2.0",
+    description="Real-time air quality monitoring with Fuzzy Logic + ARIMA Prediction",
+    version="2.0.0"
 )
 
 # Add CORS middleware
@@ -34,8 +38,9 @@ app.add_middleware(
 
 # Initialize services
 csv_path = os.path.join(os.path.dirname(__file__), "../data/dataset.csv")
-data_service = DataService(csv_path)
+data_service = DataService(csv_path, enable_prediction=True)  # Enable LSTM prediction
 fuzzy_controller = FuzzyController()
+hybrid_controller = HybridFuzzyController(fuzzy_controller)  # New: Hybrid control
 
 # Initialize IoT Controller (MQTT)
 # Configure with your MQTT broker address and port
@@ -47,27 +52,81 @@ iot_controller = get_iot_controller(MQTT_BROKER, MQTT_PORT)
 current_state = {
     "current_data": None,
     "control_output": None,
+    "predicted_data": None,           # NEW: Predicted values
+    "hybrid_control": None,           # NEW: Hybrid decision
     "alerts": [],
     "device_states": {},
     "last_update": None
 }
 
+# Auto-loop state
+auto_loop_state = {
+    "enabled": True,       # Thread vẫn chạy để cập nhật data hiển thị
+    "manual_mode": False,  # True = KHÔNG gửi MQTT (user điều khiển tay)
+    "interval": 5,
+    "cycle_count": 0,
+    "last_run": None,
+    "last_error": None,
+    "task": None
+}
+
+
+def _auto_loop_thread():
+    """
+    Background THREAD: reads CSV rows, runs Fuzzy Logic,
+    publishes MQTT command to ESP32 every N seconds.
+    Uses threading.Thread to be independent of the asyncio event loop.
+    ASCII-only prints to avoid Windows CP1252 encoding errors.
+    """
+    import time
+    global auto_loop_state
+    print(f"[AutoLoop] Thread started - interval={auto_loop_state['interval']}s", flush=True)
+
+    while True:
+        time.sleep(auto_loop_state["interval"])
+        try:
+            # Luôn đọc data để dashboard cập nhật
+            # Chỉ gửi MQTT khi KHÔNG phải manual mode
+            send_mqtt = not auto_loop_state["manual_mode"]
+            update_current_state(auto_control=send_mqtt)
+            auto_loop_state["cycle_count"] += 1
+            auto_loop_state["last_run"] = datetime.now().isoformat()
+            auto_loop_state["last_error"] = None
+            ctrl   = current_state.get("control_output") or {}
+            level  = ctrl.get("ventilation_level", 0)
+            status = ctrl.get("fan_status", "?")
+            mode   = "MANUAL" if auto_loop_state["manual_mode"] else "AUTO"
+            mqtt_ok = "OK" if iot_controller.is_connected() else "DISCONNECTED"
+            print(
+                f"[AutoLoop] #{auto_loop_state['cycle_count']} [{mode}] "
+                f"-> {level:.0f}% ({status}) | MQTT={mqtt_ok}",
+                flush=True
+            )
+        except Exception as exc:
+            auto_loop_state["last_error"] = str(exc)
+            print(f"[AutoLoop] Error: {exc}", flush=True)
+
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
-    global current_state
-    print("Air Quality Monitoring System started")
+    global current_state, auto_loop_state
+    print("Air Quality Monitoring System started", flush=True)
     # Get initial data
     update_current_state()
+    # Start background thread (daemon=True so it exits when server stops)
+    t = threading.Thread(target=_auto_loop_thread, daemon=True, name="AutoLoop")
+    t.start()
+    auto_loop_state["task"] = t
+    print(f"[AutoLoop] Background thread launched (alive={t.is_alive()})", flush=True)
 
 
 def update_current_state(auto_control: bool = False):
     """
-    Update current system state
+    Update current system state with HYBRID FUZZY + PREDICTION
     
     Args:
-        auto_control: If True, automatically control devices based on fuzzy output
+        auto_control: If True, automatically control devices based on hybrid decision
     """
     global current_state
     
@@ -75,7 +134,7 @@ def update_current_state(auto_control: bool = False):
     data = data_service.get_current_record()
     current_state["current_data"] = data
     
-    # Run fuzzy control
+    # Run fuzzy control (on current values)
     control = fuzzy_controller.control(
         data["co2"],
         data["pm25"],
@@ -84,13 +143,41 @@ def update_current_state(auto_control: bool = False):
     )
     current_state["control_output"] = control
     
+    # NEW: Get predicted values for next 5 minutes
+    predicted_data = None
+    hybrid_decision = None
+    
+    if data_service.enable_prediction:
+        try:
+            predicted_data = data_service.predict_next_5min()
+            current_state["predicted_data"] = predicted_data
+            
+            # Make hybrid decision: Current + Predicted
+            hybrid_decision = hybrid_controller.make_decision_hybrid(
+                current_sensors=data,
+                predicted_sensors=predicted_data
+            )
+            current_state["hybrid_control"] = hybrid_decision
+            
+            # Use hybrid decision for auto-control
+            if auto_control:
+                final_ventilation = hybrid_decision.get("ventilation_level", control["ventilation_level"])
+                # Call auto_control_devices with hybrid ventilation level
+                auto_control_devices_hybrid(hybrid_decision)
+            
+        except Exception as e:
+            print(f"⚠️ Prediction error: {e}", flush=True)
+            # Fall back to regular fuzzy logic
+            if auto_control:
+                auto_control_devices(control)
+    else:
+        # Fallback to regular fuzzy logic
+        if auto_control:
+            auto_control_devices(control)
+    
     # Check alerts
     alerts = AlertChecker.generate_alerts(data)
     current_state["alerts"] = alerts
-    
-    # Auto-control devices based on fuzzy output (only if enabled)
-    if auto_control:
-        auto_control_devices(control)
     
     # Update device states
     current_state["device_states"] = iot_controller.get_device_states()
@@ -99,53 +186,147 @@ def update_current_state(auto_control: bool = False):
 
 def auto_control_devices(control_output: dict):
     """
-    Automatically control IoT devices based on fuzzy control output
-    
-    Args:
-        control_output: Output from fuzzy controller containing ventilation_level
+    Automatically control IoT devices based on fuzzy control output.
+
+    Logic:
+      - Fan   : speed = ventilation_level (0-100%)
+      - Door  : open only when CO2 > 1000 ppm (DANGER level needs fresh air)
+      - Light : on when occupancy_count > 0 (someone in room)
     """
     try:
         ventilation_level = control_output.get("ventilation_level", 0)
-        
-        # Convert ventilation level (0-100) to fan speed
-        fan_speed = int(ventilation_level)
-        
-        # Control fan
-        if fan_speed > 0:
-            iot_controller.control_fan(fan_speed)
-        else:
-            iot_controller.control_fan(0)
-        
-        # Open/close door based on ventilation need
-        # Open if ventilation level > 60 (High)
-        should_open = ventilation_level > 60
-        iot_controller.control_door(should_open)
-        
-        # Turn on light if occupancy > 0 and quality is poor
-        # (This would be based on actual occupancy and air quality)
-        
+        data = current_state.get("current_data", {})
+        co2  = data.get("co2", 0)
+        occupancy = data.get("occupancy_count", 0)
+
+        # 1. Quat: toc do = muc thong gio tu Fuzzy Logic
+        iot_controller.control_fan(int(ventilation_level))
+
+        # 2. Cua: chi mo khi CO2 vuot nguong nguy hiem (> 1000 ppm)
+        #    Tang nguong de khong mo lien tuc khi luon co nhieu nguoi
+        should_open_door = co2 > 1000
+        iot_controller.control_door(should_open_door)
+
+        # 3. Den phong: bat khi co nguoi trong phong
+        iot_controller.control_light(occupancy > 0)
+
     except Exception as e:
-        print(f"Error controlling devices: {str(e)}")
+        print(f"Error controlling devices: {str(e)}", flush=True)
+
+
+def auto_control_devices_hybrid(hybrid_decision: dict):
+    """
+    NEW: Automatically control IoT devices based on HYBRID (Current + Predicted) decision
+    
+    Uses ventilation level from hybrid controller which combines current + predicted values
+    """
+    try:
+        ventilation_level = hybrid_decision.get("ventilation_level", 0)
+        change_detected = hybrid_decision.get("change_detected", False)
+        alert_msg = hybrid_decision.get("alert_message", "")
+        
+        # Get current data for safety checks
+        data = current_state.get("current_data", {})
+        co2 = data.get("co2", 0)
+        occupancy = data.get("occupancy_count", 0)
+
+        # 1. Fan: speed = hybrid ventilation level (combines current + predicted)
+        iot_controller.control_fan(int(ventilation_level))
+
+        # 2. Door: open if CO2 high OR predicted CO2 high
+        #    Make door decision more aggressive based on prediction
+        predicted_data = current_state.get("predicted_data", {})
+        co2_pred = predicted_data.get("CO2", co2) if predicted_data else co2
+        should_open_door = co2 > 1000 or co2_pred > 1000
+        iot_controller.control_door(should_open_door)
+
+        # 3. Light: on when occupancy > 0 (current or predicted)
+        occupancy_pred = predicted_data.get("Occupancy_Count", occupancy) if predicted_data else occupancy
+        iot_controller.control_light(occupancy > 0 or occupancy_pred > 0)
+        
+        # Print alert if significant change detected
+        if change_detected and alert_msg:
+            print(f"[ALERT] {alert_msg}", flush=True)
+
+    except Exception as e:
+        print(f"Error in hybrid control: {str(e)}", flush=True)
 
 
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {
-        "name": "Air Quality Monitoring System API",
-        "version": "1.0.0",
-        "status": "running"
+        "name": "Air Quality Monitoring System API v2.0",
+        "version": "2.0.0",
+        "status": "running",
+        "features": ["Fuzzy Logic Control", "Time Series Prediction", "Hybrid Decision Making"]
     }
 
 
 @app.get("/api/current-data")
 async def get_current_data():
-    """Get current environmental data with auto-control enabled"""
-    update_current_state(auto_control=True)
+    """Get current data including predictions and hybrid decision"""
+    send_mqtt = not auto_loop_state["manual_mode"]
+    update_current_state(auto_control=send_mqtt)
     return {
         "data": current_state["current_data"],
         "control": current_state["control_output"],
+        "predicted_data": current_state.get("predicted_data"),  # NEW
+        "hybrid_decision": current_state.get("hybrid_control"),  # NEW
         "alerts": current_state["alerts"],
+        "timestamp": current_state["last_update"]
+    }
+
+
+@app.get("/api/predictions")
+async def get_predictions():
+    """Get predictions for next 5 minutes"""
+    if not data_service.enable_prediction:
+        return {
+            "status": "unavailable",
+            "message": "LSTM Predictor not available",
+            "reason": "TensorFlow not installed or model not trained"
+        }
+    
+    predicted_data = data_service.predict_next_5min()
+    current_state["predicted_data"] = predicted_data
+
+    current_data = current_state.get("current_data")
+    if current_data and predicted_data:
+        try:
+            current_state["hybrid_control"] = hybrid_controller.make_decision_hybrid(
+                current_sensors=current_data,
+                predicted_sensors=predicted_data
+            )
+        except Exception as e:
+            print(f"Prediction endpoint hybrid refresh error: {e}", flush=True)
+    
+    return {
+        "status": "available",
+        "prediction_horizon": "5 minutes",
+        "predicted_values": predicted_data,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/api/hybrid-decision")
+async def get_hybrid_decision():
+    """Get hybrid control decision (Current + Predicted)"""
+    hybrid = current_state.get("hybrid_control")
+    if not hybrid:
+        return {
+            "status": "not_available",
+            "message": "No hybrid decision yet. Ensure predictor is enabled."
+        }
+    
+    return {
+        "status": "available",
+        "current_ventilation": hybrid.get("current_reading"),
+        "predicted_ventilation": hybrid.get("predicted_reading"),
+        "final_decision": hybrid.get("ventilation_level"),
+        "change_detected": hybrid.get("change_detected"),
+        "alert": hybrid.get("alert_message"),
+        "reasoning": hybrid.get("reasoning"),
         "timestamp": current_state["last_update"]
     }
 
@@ -409,6 +590,54 @@ async def get_mqtt_info():
                 "4. Sử dụng các endpoint này để gửi lệnh"
             ]
         }
+    }
+
+
+@app.get("/api/devices/auto-loop")
+async def get_auto_loop_status():
+    """Xem trạng thái auto-loop"""
+    return {
+        "enabled":     auto_loop_state["enabled"],
+        "manual_mode": auto_loop_state["manual_mode"],
+        "interval_s":  auto_loop_state["interval"],
+        "cycle_count": auto_loop_state["cycle_count"],
+        "last_run":    auto_loop_state["last_run"],
+        "last_error":  auto_loop_state["last_error"],
+        "mqtt_connected": iot_controller.is_connected(),
+    }
+
+
+@app.post("/api/devices/manual-mode")
+async def set_manual_mode(
+    enabled: bool = Query(False, description="True = thủ công, False = tự động")
+):
+    """
+    Bật/tắt chế độ thủ công.
+    - True:  MQTT bị khóa, user điều khiển bằng tay
+    - False: Fuzzy Logic tự gửi lệnh mỗi 5s
+    """
+    auto_loop_state["manual_mode"] = enabled
+    mode = "MANUAL" if enabled else "AUTO"
+    print(f"[Mode] Switched to {mode}", flush=True)
+    return {
+        "status": "ok",
+        "manual_mode": enabled,
+        "mode": mode,
+    }
+
+
+@app.post("/api/devices/auto-loop")
+async def set_auto_loop(
+    enabled: bool = Query(True, description="Bật/tắt auto-loop thread"),
+    interval: int = Query(5, ge=1, le=60, description="Giây giữa mỗi vòng lặp")
+):
+    """Điều chỉnh tốc độ auto-loop (không liên quan đến manual mode)"""
+    auto_loop_state["enabled"]  = enabled
+    auto_loop_state["interval"] = interval
+    return {
+        "status": "ok",
+        "enabled":    enabled,
+        "interval_s": interval,
     }
 
 

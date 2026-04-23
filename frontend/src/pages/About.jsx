@@ -1,210 +1,253 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { apiClient } from '../services/api';
-import Header from '../components/Header';
 
-const About = () => {
+const PIPELINE = [
+  {
+    n: '1',
+    title: 'Load dataset',
+    desc: 'Backend reads data/dataset.csv with around 1000 rows of classroom air-quality history.',
+    style: 'border-l-sky-400 bg-sky-50/60',
+  },
+  {
+    n: '2',
+    title: 'Train predictor',
+    desc: 'Prediction layer learns patterns from the dataset. The docs describe an LSTM design, while the current backend can also run with ARIMA fallback.',
+    style: 'border-l-violet-400 bg-violet-50/60',
+  },
+  {
+    n: '3',
+    title: 'Predict next 5 minutes',
+    desc: 'System estimates future CO2, PM2.5, humidity, occupancy, and related signals for the next 5-minute step.',
+    style: 'border-l-fuchsia-400 bg-fuchsia-50/60',
+  },
+  {
+    n: '4',
+    title: 'Run fuzzy twice',
+    desc: 'Fuzzy control is applied to both current readings and predicted readings to compare reactive vs proactive ventilation output.',
+    style: 'border-l-amber-400 bg-amber-50/60',
+  },
+  {
+    n: '5',
+    title: 'Hybrid decision',
+    desc: 'Hybrid controller keeps the safer value by using MAX(current ventilation, predicted ventilation).',
+    style: 'border-l-emerald-400 bg-emerald-50/60',
+  },
+  {
+    n: '6',
+    title: 'Show on dashboard',
+    desc: 'Frontend displays current data, predicted data, and the final hybrid decision for the next 5 minutes.',
+    style: 'border-l-teal-400 bg-teal-50/60',
+  },
+];
+
+const DATASET_COLUMNS = [
+  'Timestamp',
+  'Temperature',
+  'Humidity',
+  'CO2',
+  'PM2.5',
+  'PM10',
+  'TVOC',
+  'CO',
+  'Occupancy_Count',
+];
+
+const API_FLOW = [
+  { label: 'Current snapshot', value: 'GET /api/current-data' },
+  { label: '5-minute prediction', value: 'GET /api/predictions' },
+  { label: 'Hybrid output', value: 'GET /api/hybrid-decision' },
+];
+
+const HIGHLIGHTS = [
+  'Prediction is based on the historical dataset, not random values.',
+  'Target horizon is 1 step ahead, equivalent to the next 5 minutes.',
+  'Dashboard compares current readings with predicted readings.',
+  'Final ventilation uses a proactive hybrid strategy for safer control.',
+];
+
+export default function About() {
   const [sysInfo, setSysInfo] = useState(null);
+  const features = Array.isArray(sysInfo?.features) ? sysInfo.features : [];
+  const parameters = Array.isArray(sysInfo?.parameters) ? sysInfo.parameters : [];
 
   useEffect(() => {
-    const fetchInfo = async () => {
-      try {
-        const response = await apiClient.getSystemInfo();
-        setSysInfo(response.data);
-      } catch (error) {
-        console.error('Error fetching system info:', error);
-      }
-    };
-
-    fetchInfo();
+    apiClient.getSystemInfo().then((r) => setSysInfo(r.data)).catch(console.error);
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-8">
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
-        <Header 
-          title="ℹ️ Giới thiệu Hệ thống"
-          subtitle="Hệ thống Giám sát Chất lượng Không khí trong Phòng học"
-        />
-
-        {/* System Info */}
-        {sysInfo && (
-          <div className="card">
-            <h3 className="text-2xl font-bold mb-4">{sysInfo.name}</h3>
-            <p className="text-gray-700 mb-4">{sysInfo.description}</p>
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div><span className="font-semibold">Phiên bản:</span> {sysInfo.version}</div>
+    <div className="max-w-5xl mx-auto px-5 py-6 space-y-6 pb-14">
+      <section className="card bg-slate-900 border-slate-800 text-white overflow-hidden relative">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(45,212,191,0.18),_transparent_35%),radial-gradient(circle_at_bottom_left,_rgba(56,189,248,0.18),_transparent_30%)]" />
+        <div className="relative flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-xs uppercase tracking-[0.28em] text-teal-300/80 mb-3">HTTM Hybrid Prediction</p>
+            <h1 className="text-xl md:text-2xl font-semibold leading-tight">
+              {sysInfo?.name ?? 'Air Quality Monitoring System'}
+            </h1>
+            <p className="text-slate-300 text-sm md:text-[15px] mt-3 leading-relaxed">
+              This project does not stop at monitoring current air quality. It uses the historical
+              dataset to estimate what the classroom environment will look like in the next 5 minutes,
+              then combines that forecast with fuzzy logic for proactive ventilation control.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-4">
+              <span className="badge badge-teal">Dataset-driven</span>
+              <span className="badge badge-blue">5-minute forecast</span>
+              <span className="badge badge-green">Hybrid fuzzy control</span>
             </div>
-
-            <h4 className="text-lg font-bold mb-3">✨ Tính năng chính:</h4>
-            <ul className="space-y-2 ml-4">
-              {sysInfo.features.map((feature, idx) => (
-                <li key={idx} className="flex items-start">
-                  <span className="mr-3 text-xl">✓</span>
-                  <span>{feature}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* System Architecture */}
-        <div className="card">
-          <h3 className="text-xl font-bold mb-4">🏗️ Kiến trúc Hệ thống</h3>
-          <div className="space-y-4 text-sm text-gray-700">
-            <div className="p-4 bg-blue-50 rounded border-l-4 border-l-blue-500">
-              <div className="font-bold text-blue-900">📊 Dữ liệu cảm biến/CSV</div>
-              <p className="mt-1">Đọc dữ liệu từ file CSV hoặc cảm biến thực</p>
-            </div>
-            <div className="text-center text-2xl">⬇️</div>
-            <div className="p-4 bg-green-50 rounded border-l-4 border-l-green-500">
-              <div className="font-bold text-green-900">⚙️ Xử lý Dữ liệu</div>
-              <p className="mt-1">Làm sạch, chuẩn hóa dữ liệu, kiểm tra thống kê</p>
-            </div>
-            <div className="text-center text-2xl">⬇️</div>
-            <div className="p-4 bg-purple-50 rounded border-l-4 border-l-purple-500">
-              <div className="font-bold text-purple-900">🔍 Kiểm tra Ngưỡng</div>
-              <p className="mt-1">So sánh với các giá trị ngưỡng được định nghĩa</p>
-            </div>
-            <div className="text-center text-2xl">⬇️</div>
-            <div className="p-4 bg-red-50 rounded border-l-4 border-l-red-500">
-              <div className="font-bold text-red-900">🧠 Fuzzy Logic Control</div>
-              <p className="mt-1">Fuzzification → Rule Evaluation → Defuzzification</p>
-            </div>
-            <div className="text-center text-2xl">⬇️</div>
-            <div className="p-4 bg-yellow-50 rounded border-l-4 border-l-yellow-500">
-              <div className="font-bold text-yellow-900">🌬️ Điều khiển Quạt/Thông gió</div>
-              <p className="mt-1">Output: Mức thông gió (Low/Medium/High)</p>
-            </div>
-            <div className="text-center text-2xl">⬇️</div>
-            <div className="p-4 bg-orange-50 rounded border-l-4 border-l-orange-500">
-              <div className="font-bold text-orange-900">📱 Hiển thị Cảnh báo & Dashboard</div>
-              <p className="mt-1">Giao diện web hiển thị trực quan kết quả</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Specifications */}
-        {sysInfo && (
-          <div className="card">
-            <h3 className="text-xl font-bold mb-4">📝 Thông số Hệ thống</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h4 className="font-bold text-blue-600 mb-3">📊 Các chỉ số được theo dõi:</h4>
-                <ul className="space-y-2 text-sm">
-                  {sysInfo.parameters.map((param, idx) => (
-                    <li key={idx} className="flex items-center">
-                      <span className="mr-2">📌</span>
-                      <span>{param}</span>
-                    </li>
-                  ))}
-                </ul>
+            {features.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                {features.map((feature, index) => (
+                  <span key={index} className="text-xs bg-white/10 text-slate-200 px-2.5 py-1 rounded-full">
+                    {feature}
+                  </span>
+                ))}
               </div>
+            )}
+          </div>
 
-              <div>
-                <h4 className="font-bold text-green-600 mb-3">🎯 Mục tiêu điều khiển:</h4>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-center">
-                    <span className="mr-2">✓</span>
-                    <span>Duy trì CO2 &lt; 800 ppm</span>
-                  </li>
-                  <li className="flex items-center">
-                    <span className="mr-2">✓</span>
-                    <span>Gibadnrữ PM2.5 &lt; 35 µg/m³</span>
-                  </li>
-                  <li className="flex items-center">
-                    <span className="mr-2">✓</span>
-                    <span>Duy trì độ ẩm 40-70%</span>
-                  </li>
-                  <li className="flex items-center">
-                    <span className="mr-2">✓</span>
-                    <span>Tối ưu hóa mức thông gió</span>
-                  </li>
-                </ul>
+          <div className="grid grid-cols-2 gap-3 min-w-[260px]">
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+              <p className="text-xs text-slate-400">Dataset</p>
+              <p className="num text-2xl font-semibold text-white mt-1">1000</p>
+              <p className="text-xs text-slate-400 mt-1">historical rows</p>
+            </div>
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+              <p className="text-xs text-slate-400">Forecast</p>
+              <p className="num text-2xl font-semibold text-white mt-1">5m</p>
+              <p className="text-xs text-slate-400 mt-1">next-step horizon</p>
+            </div>
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+              <p className="text-xs text-slate-400">Controller</p>
+              <p className="text-sm font-semibold text-white mt-1">Fuzzy + Hybrid</p>
+              <p className="text-xs text-slate-400 mt-1">reactive and proactive</p>
+            </div>
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+              <p className="text-xs text-slate-400">API output</p>
+              <p className="text-sm font-semibold text-white mt-1">current + predicted</p>
+              <p className="text-xs text-slate-400 mt-1">decision-ready data</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">How the 5-minute prediction works</p>
+            <p className="text-xs text-slate-500 mt-1">Pipeline from dataset to dashboard decision</p>
+          </div>
+          <span className="badge badge-slate">data / predict / fuzzy / hybrid</span>
+        </div>
+        <div className="space-y-2.5">
+          {PIPELINE.map((step, index) => (
+            <React.Fragment key={step.n}>
+              <div className={`flex items-start gap-3 rounded-xl border-l-[3px] px-4 py-3 ${step.style}`}>
+                <span className="num w-7 h-7 rounded-full bg-white border border-slate-200 text-slate-700 text-xs font-semibold flex items-center justify-center shrink-0">
+                  {step.n}
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{step.title}</p>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">{step.desc}</p>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Technology Stack */}
-        <div className="card">
-          <h3 className="text-xl font-bold mb-4">💻 Công nghệ Sử dụng</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <h4 className="font-bold text-blue-600 mb-3">Frontend</h4>
-              <ul className="space-y-1 text-sm">
-                <li>⚛️ React 18.2</li>
-                <li>🎨 Tailwind CSS</li>
-                <li>📊 Recharts</li>
-                <li>⚡ Vite</li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-bold text-green-600 mb-3">Backend</h4>
-              <ul className="space-y-1 text-sm">
-                <li>🐍 Python 3.9+</li>
-                <li>⚡ FastAPI</li>
-                <li>📊 Pandas</li>
-                <li>🧠 Scikit-Fuzzy</li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-bold text-purple-600 mb-3">Dữ liệu</h4>
-              <ul className="space-y-1 text-sm">
-                <li>📁 CSV File</li>
-                <li>📈 Pandas DataFrame</li>
-                <li>⏰ Real-time Updates</li>
-                <li>🔄 Data Simulation</li>
-              </ul>
-            </div>
-          </div>
+              {index < PIPELINE.length - 1 && (
+                <div className="ml-8 text-slate-300 text-xs leading-none">|</div>
+              )}
+            </React.Fragment>
+          ))}
         </div>
+      </section>
 
-        {/* Research Background */}
-        <div className="card border-l-4 border-l-blue-500 bg-blue-50">
-          <h3 className="text-xl font-bold mb-4">📚 Nền tảng Nghiên cứu</h3>
-          <div className="space-y-3 text-sm text-gray-700">
-            <p>
-              <span className="font-semibold">Fuzzy Logic Control</span> là một phương pháp điều khiển 
-              dựa trên lý thuyết tập mờ (Fuzzy Set Theory). Thay vì chỉ sử dụng các giá trị nhị phân (có/không), 
-              lý thuyết mờ cho phép các giá trị trung gian, giúp mô phỏng tốt hơn cách suy luận của con người.
-            </p>
-            <p>
-              <span className="font-semibold">Ứng dụng trong chất lượng không khí:</span> Hệ thống sử dụng 
-              các luật mờ để quyết định mức thông gió dựa trên nhiều chỉ số môi trường. Thay vì thiết lập 
-              các ngưỡng cứng nhắc, Fuzzy Logic cho phép sự chuyển đổi mềm mại giữa các mức độ khác nhau.
-            </p>
-            <p>
-              <span className="font-semibold">Lợi ích:</span> Giảm năng lượng tiêu thụ, cải thiện thoải mái, 
-              phản ứng nhanh với thay đổi môi trường, và thích nghi với các điều kiện khác nhau.
-            </p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section className="card">
+          <p className="text-sm font-semibold text-slate-800 mb-3">Dataset foundation</p>
+          <p className="text-sm text-slate-600 leading-relaxed mb-4">
+            The prediction layer is trained from the classroom dataset stored in
+            `data/dataset.csv`. That dataset provides the historical sequence used to learn
+            patterns before estimating the next 5-minute state.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {DATASET_COLUMNS.map((column) => (
+              <span key={column} className="badge badge-blue">
+                {column}
+              </span>
+            ))}
           </div>
-        </div>
+        </section>
 
-        {/* Project Team */}
-        <div className="card">
-          <h3 className="text-xl font-bold mb-4">👥 Thông tin Dự án</h3>
-          <div className="space-y-4">
-            <div>
-              <span className="text-sm text-gray-600">Đề tài:</span>
-              <p className="font-semibold text-lg">
-                Hệ thống giám sát chất lượng không khí trong phòng học/lớp học 
-                và điều khiển thiết bị bằng Fuzzy Logic Control
-              </p>
-            </div>
-            <div>
-              <span className="text-sm text-gray-600">Mục đích:</span>
-              <p className="mt-1">
-                Xây dựng một hệ thống thông minh để giám sát và điều khiển chất lượng không khí trong phòng học, 
-                giúp cải thiện sức khỏe và hiệu suất học tập của học sinh.
-              </p>
-            </div>
+        <section className="card">
+          <p className="text-sm font-semibold text-slate-800 mb-3">Prediction and control outputs</p>
+          <div className="space-y-3">
+            {API_FLOW.map((item) => (
+              <div key={item.value} className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{item.label}</p>
+                  <p className="text-xs text-slate-500 mt-1">Used by frontend dashboard panels</p>
+                </div>
+                <span className="num text-xs text-slate-600 bg-white border border-slate-200 rounded-lg px-2 py-1">
+                  {item.value}
+                </span>
+              </div>
+            ))}
           </div>
-        </div>
+        </section>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section className="card bg-slate-50/70 border-slate-200">
+          <p className="text-sm font-semibold text-slate-800 mb-3">Why hybrid control is used</p>
+          <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
+            <p>
+              A normal fuzzy controller reacts only to the current snapshot. In this project,
+              fuzzy control also runs on the predicted readings so the system can prepare earlier
+              when air quality is likely to worsen in the next 5 minutes.
+            </p>
+            <p>
+              The hybrid controller then keeps the safer ventilation output using the rule
+              `MAX(current, predicted)`.
+            </p>
+          </div>
+        </section>
+
+        <section className="card">
+          <p className="text-sm font-semibold text-slate-800 mb-3">Key project points</p>
+          <ul className="space-y-2.5">
+            {HIGHLIGHTS.map((item) => (
+              <li key={item} className="flex items-start gap-2 text-sm text-slate-600">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-2 shrink-0" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      <section className="card">
+        <p className="text-sm font-semibold text-slate-800 mb-4">Project info</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <p className="text-xs text-slate-400 mb-1">Goal</p>
+            <p className="text-slate-700">
+              Monitor classroom air quality, forecast the next 5-minute condition, and control
+              ventilation with a safer hybrid fuzzy strategy.
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 mb-1">Tracked parameters</p>
+            <p className="text-slate-700">
+              {parameters.length > 0 ? parameters.join(', ') : 'Temperature, humidity, CO2, PM2.5, PM10, TVOC, CO, occupancy'}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 mb-1">Prediction basis</p>
+            <p className="text-slate-700">Historical dataset + time-series predictor + hybrid fuzzy inference</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 mb-1">Version</p>
+            <p className="num font-semibold text-slate-800">{sysInfo?.version ?? '2.0.0'}</p>
+          </div>
+        </div>
+      </section>
     </div>
   );
-};
-
-export default About;
+}

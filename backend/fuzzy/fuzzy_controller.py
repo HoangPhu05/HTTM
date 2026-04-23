@@ -212,12 +212,16 @@ class FuzzyController:
         return numerator / denominator
     
     def get_fan_status(self, ventilation_level):
-        """Convert ventilation level to fan status"""
-        if ventilation_level < 25:
+        """Convert ventilation level to fan status.
+        Thresholds match output membership function boundaries:
+          Low: 0-33, Medium: 25-75, High: 67-100
+        Midpoints between centroids (15,50,85): 32.5 và 67.5
+        """
+        if ventilation_level < 15:
             return "Off"
-        elif ventilation_level < 50:
+        elif ventilation_level < 33:
             return "Low"
-        elif ventilation_level < 75:
+        elif ventilation_level < 67:
             return "Medium"
         else:
             return "High"

@@ -1,305 +1,227 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../services/api';
-import Header from '../components/Header';
 import ControlOutput from '../components/ControlOutput';
 
-const FuzzyDetails = () => {
-  const [control, setControl] = useState(null);
-  const [customInputs, setCustomInputs] = useState({
-    co2: 800,
-    pm25: 30,
-    humidity: 55,
-    occupancy: 20,
-  });
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
-  const [applyControl, setApplyControl] = useState(true); // Always enabled
-  const [isManualMode, setIsManualMode] = useState(true);
+const SLIDERS = [
+  { name: 'co2',       label: 'CO₂',      unit: 'ppm',   min: 0, max: 2000, color: 'text-blue-700',   accent: 'accent-blue-600'   },
+  { name: 'pm25',      label: 'PM2.5',    unit: 'µg/m³', min: 0, max: 200,  color: 'text-red-700',    accent: 'accent-red-600'    },
+  { name: 'humidity',  label: 'Độ ẩm',    unit: '%',     min: 0, max: 100,  color: 'text-emerald-700',accent: 'accent-emerald-600'},
+  { name: 'occupancy', label: 'Số người', unit: 'người', min: 0, max: 60,   color: 'text-amber-700',  accent: 'accent-amber-500'  },
+];
+
+const RULES = [
+  { id: 1, condition: 'CO₂ cao  HOẶC  PM2.5 cao',                    output: 'Ventilation = High',   level: 'high'   },
+  { id: 2, condition: 'CO₂ trung bình  VÀ  Độ ẩm cao',              output: 'Ventilation = Medium', level: 'medium' },
+  { id: 3, condition: 'CO₂ thấp  VÀ  PM2.5 thấp  VÀ  Số người thấp', output: 'Ventilation = Low',   level: 'low'    },
+  { id: 4, condition: 'Số người cao',                                  output: 'Ventilation = High',   level: 'high'   },
+  { id: 5, condition: 'PM2.5 cao',                                     output: 'Ventilation = High',   level: 'high'   },
+  { id: 6, condition: 'CO₂ trung bình  HOẶC  Số người trung bình',   output: 'Ventilation = Medium', level: 'medium' },
+];
+
+const RULE_STYLE = {
+  high:   'border-l-red-400 bg-red-50/50',
+  medium: 'border-l-amber-400 bg-amber-50/50',
+  low:    'border-l-emerald-400 bg-emerald-50/50',
+};
+
+const MF_TABLE = [
+  { var: 'CO₂ (ppm)',     sets: [{ label: 'Low', range: '0 – 800',    c: 'badge-green' }, { label: 'Medium', range: '600 – 1800', c: 'badge-amber' }, { label: 'High', range: '1000 – 2000', c: 'badge-red' }] },
+  { var: 'PM2.5 (µg/m³)', sets: [{ label: 'Low', range: '0 – 35',     c: 'badge-green' }, { label: 'Medium', range: '25 – 100',   c: 'badge-amber' }, { label: 'High', range: '75 – 200',    c: 'badge-red' }] },
+  { var: 'Độ ẩm (%)',     sets: [{ label: 'Low', range: '0 – 40',     c: 'badge-green' }, { label: 'Normal', range: '35 – 70',    c: 'badge-amber' }, { label: 'High', range: '65 – 100',    c: 'badge-red' }] },
+  { var: 'Số người',      sets: [{ label: 'Low', range: '0 – 15',     c: 'badge-green' }, { label: 'Medium', range: '10 – 45',   c: 'badge-amber' }, { label: 'High', range: '35 – 60',     c: 'badge-red' }] },
+];
+
+const STEPS = [
+  { n: '1', label: 'Fuzzification',   desc: 'Chuyển giá trị thực sang tập mờ — Low, Medium, High' },
+  { n: '2', label: 'Rule Evaluation', desc: 'Đánh giá các luật IF-THEN bằng toán tử AND / OR' },
+  { n: '3', label: 'Defuzzification', desc: 'Tổng hợp kết quả bằng phương pháp Centroid' },
+];
+
+export default function FuzzyDetails() {
+  const [control,      setControl]      = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [running,      setRunning]      = useState(false);
+  const [message,      setMessage]      = useState(null);
+  const [applyControl, setApplyControl] = useState(false);
+  const [inputs,       setInputs]       = useState({ co2: 800, pm25: 30, humidity: 55, occupancy: 20 });
 
   useEffect(() => {
-    // Fetch initial control data once, no auto-refresh
-    fetchControl();
+    apiClient.getControlOutput()
+      .then((r) => setControl(r.data))
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
-  const fetchControl = async () => {
-    try {
-      const response = await apiClient.getControlOutput();
-      // Only update if in auto mode (not manual slider mode)
-      if (!isManualMode) {
-        setControl(response.data);
-      }
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching control:', error);
-    }
-  };
-
-  const handleInputChange = (e) => {
-    setIsManualMode(true); // Enter manual mode when changing sliders
+  const handleChange = (e) => {
     const { name, value } = e.target;
-    setCustomInputs(prev => ({
-      ...prev,
-      [name]: parseFloat(value)
-    }));
+    setInputs((prev) => ({ ...prev, [name]: parseFloat(value) }));
   };
 
-  const handleCustomFuzzyControl = async () => {
+  const handleRun = async () => {
+    setRunning(true);
+    setMessage(null);
     try {
-      const response = await apiClient.runFuzzyControl(
-        customInputs.co2,
-        customInputs.pm25,
-        customInputs.humidity,
-        customInputs.occupancy,
-        applyControl
+      const r = await apiClient.runFuzzyControl(
+        inputs.co2, inputs.pm25, inputs.humidity, inputs.occupancy, applyControl
       );
-      
-      // Transform nested response to flat structure for ControlOutput
-      const flatControl = {
-        ventilation_level: response.data.output?.ventilation_level ?? 0,
-        fan_status: response.data.output?.fan_status ?? 'Unknown',
-        explanation: response.data.output?.explanation ?? '',
-        fuzzification: response.data.fuzzification || {},
-        active_rules: response.data.active_rules || [],
-        rule_count: response.data.active_rules?.length || 0,
-        applied_to_devices: response.data.applied_to_devices,
-        device_states: response.data.device_states
-      };
-      
-      setControl(flatControl);
-      
+      setControl({
+        ventilation_level: r.data.output?.ventilation_level ?? 0,
+        fan_status:        r.data.output?.fan_status ?? 'Unknown',
+        explanation:       r.data.output?.explanation ?? '',
+        fuzzification:     r.data.fuzzification || {},
+        active_rules:      r.data.active_rules || [],
+        rule_count:        r.data.active_rules?.length || 0,
+      });
       if (applyControl) {
-        setMessage(`✅ Điều khiển thiết bị: Mức ${flatControl.ventilation_level.toFixed(0)}%`);
-        setTimeout(() => setMessage(''), 3000);
+        setMessage({ ok: true, text: `Đã áp dụng: mức thông gió ${(r.data.output?.ventilation_level ?? 0).toFixed(0)}%` });
+        setTimeout(() => setMessage(null), 3000);
       }
-    } catch (error) {
-      console.error('Error running fuzzy control:', error);
-      setMessage('❌ Lỗi thực thi Fuzzy Control');
-      setTimeout(() => setMessage(''), 3000);
+    } catch {
+      setMessage({ ok: false, text: 'Lỗi khi chạy Fuzzy Control' });
+      setTimeout(() => setMessage(null), 3000);
+    } finally {
+      setRunning(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-8">
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        <Header 
-          title="🔧 Chi tiết Fuzzy Logic Control"
-          subtitle="Phân tích chi tiết quá trình điều khiển"
-        />
+    <div className="max-w-7xl mx-auto px-5 py-6 space-y-6 pb-14">
 
-        {/* Custom Input Panel */}
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">🎯 Kiểm thử với giá trị tùy chỉnh</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                CO2 (ppm)
-              </label>
-              <input
-                type="range"
-                name="co2"
-                min="0"
-                max="2000"
-                value={customInputs.co2}
-                onChange={handleInputChange}
-                className="w-full"
-              />
-              <div className="text-center mt-1 font-bold text-blue-600">
-                {customInputs.co2.toFixed(0)}
+      <h1 className="text-lg font-semibold text-slate-900">Fuzzy Logic Control</h1>
+
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
+
+        {/* Left: inputs */}
+        <div className="xl:col-span-2 space-y-5">
+
+          {/* Slider inputs */}
+          <div className="card space-y-5">
+            <p className="text-sm font-semibold text-slate-700">Giá trị đầu vào</p>
+
+            {SLIDERS.map((s) => (
+              <div key={s.name}>
+                <div className="flex justify-between items-baseline mb-2">
+                  <label className="text-sm font-medium text-slate-600">{s.label}</label>
+                  <span className={`num text-lg font-semibold ${s.color}`}>
+                    {s.name === 'occupancy'
+                      ? Math.round(inputs[s.name])
+                      : inputs[s.name].toFixed(s.name === 'co2' ? 0 : 1)}
+                    <span className="text-xs font-normal text-slate-400 ml-1">{s.unit}</span>
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  name={s.name}
+                  min={s.min}
+                  max={s.max}
+                  value={inputs[s.name]}
+                  onChange={handleChange}
+                  className={`w-full ${s.accent}`}
+                />
+                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                  <span>{s.min}</span>
+                  <span>{s.max} {s.unit}</span>
+                </div>
               </div>
+            ))}
+
+            <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+              <button
+                onClick={handleRun}
+                disabled={running}
+                className="flex-1 btn btn-primary text-sm disabled:opacity-60 justify-center"
+              >
+                {running ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Đang chạy…
+                  </>
+                ) : 'Chạy Fuzzy Control'}
+              </button>
+              <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none shrink-0">
+                <input
+                  type="checkbox"
+                  checked={applyControl}
+                  onChange={(e) => setApplyControl(e.target.checked)}
+                  className="w-4 h-4 accent-teal-600"
+                />
+                Áp dụng thiết bị
+              </label>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                PM2.5 (µg/m³)
-              </label>
-              <input
-                type="range"
-                name="pm25"
-                min="0"
-                max="200"
-                value={customInputs.pm25}
-                onChange={handleInputChange}
-                className="w-full"
-              />
-              <div className="text-center mt-1 font-bold text-red-600">
-                {customInputs.pm25.toFixed(1)}
+            {message && (
+              <div className={`flex items-center gap-2 text-sm px-3 py-2.5 rounded-lg font-medium ${
+                message.ok ? 'bg-teal-50 text-teal-800' : 'bg-red-50 text-red-700'
+              }`}>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${message.ok ? 'bg-teal-500' : 'bg-red-500'}`} />
+                {message.text}
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Độ ẩm (%)
-              </label>
-              <input
-                type="range"
-                name="humidity"
-                min="0"
-                max="100"
-                value={customInputs.humidity}
-                onChange={handleInputChange}
-                className="w-full"
-              />
-              <div className="text-center mt-1 font-bold text-green-600">
-                {customInputs.humidity.toFixed(0)}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Số người
-              </label>
-              <input
-                type="range"
-                name="occupancy"
-                min="0"
-                max="60"
-                value={customInputs.occupancy}
-                onChange={handleInputChange}
-                className="w-full"
-              />
-              <div className="text-center mt-1 font-bold text-yellow-600">
-                {parseInt(customInputs.occupancy)}
-              </div>
-            </div>
+            )}
           </div>
 
-          <div className="flex gap-3">
-            <button
-              onClick={handleCustomFuzzyControl}
-              className="flex-1 btn btn-primary"
-            >
-              ▶️ Chạy Fuzzy Control & Điều khiển Thiết bị
-            </button>
+          {/* Process steps */}
+          <div className="card space-y-4">
+            <p className="text-sm font-semibold text-slate-700">Quy trình Fuzzy Logic</p>
+            {STEPS.map(({ n, label, desc }) => (
+              <div key={n} className="flex items-start gap-3">
+                <span className="w-6 h-6 rounded-full bg-teal-600 text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                  {n}
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{label}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{desc}</p>
+                </div>
+              </div>
+            ))}
           </div>
-
-          {message && (
-            <div className={`mt-3 p-3 rounded-lg text-center font-semibold ${
-              message.startsWith('✅')
-                ? 'bg-green-100 text-green-700'
-                : 'bg-red-100 text-red-700'
-            }`}>
-              {message}
-            </div>
-          )}
         </div>
 
-        {/* Control Output */}
-        {control && (
+        {/* Right: result */}
+        <div className="xl:col-span-3">
           <ControlOutput control={control} loading={loading} />
-        )}
-
-        {/* Fuzzy Logic Explanation */}
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">📚 Hướng dẫn Fuzzy Logic Control</h3>
-          <div className="space-y-4 text-sm text-gray-700">
-            <div>
-              <h4 className="font-bold text-blue-600 mb-2">1️⃣ Fuzzification (Mờ hóa)</h4>
-              <p>
-                Chuyển đổi các giá trị cảm biến thực (crisp values) thành các biến mờ (fuzzy values).
-                Mỗi input được ánh xạ vào các tập mờ như "Low", "Medium", "High" với độ thành viên (membership).
-              </p>
-            </div>
-            <div>
-              <h4 className="font-bold text-green-600 mb-2">2️⃣ Rule Evaluation (Đánh giá luật)</h4>
-              <p>
-                Áp dụng các luật mờ được định nghĩa sẵn. Mỗi luật là một mệnh đề: 
-                "Nếu CO2 cao VÀ PM2.5 cao THÌ mức thông gió = cao"
-              </p>
-            </div>
-            <div>
-              <h4 className="font-bold text-purple-600 mb-2">3️⃣ Defuzzification (Khử mờ)</h4>
-              <p>
-                Chuyển đổi kết quả mờ từ các luật trở lại giá trị cụ thể (crisp value).
-                Sử dụng phương pháp Centroid để tính mức thông gió cuối cùng (0-100).
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Rule Base */}
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">📋 Cơ sở luật (Rule Base)</h3>
-          <div className="space-y-3">
-            <div className="p-3 bg-blue-50 rounded border-l-4 border-l-blue-500">
-              <div className="font-medium">Luật 1:</div>
-              <div className="text-sm text-gray-700">
-                Nếu (CO2 cao HOẶC PM2.5 cao) &rarr; Ventilation = High
-              </div>
-            </div>
-            <div className="p-3 bg-blue-50 rounded border-l-4 border-l-blue-500">
-              <div className="font-medium">Luật 2:</div>
-              <div className="text-sm text-gray-700">
-                Nếu (CO2 trung bình VÀ Độ ẩm cao) &rarr; Ventilation = Medium
-              </div>
-            </div>
-            <div className="p-3 bg-blue-50 rounded border-l-4 border-l-blue-500">
-              <div className="font-medium">Luật 3:</div>
-              <div className="text-sm text-gray-700">
-                Nếu (CO2 thấp VÀ PM2.5 thấp VÀ Số người thấp) &rarr; Ventilation = Low
-              </div>
-            </div>
-            <div className="p-3 bg-blue-50 rounded border-l-4 border-l-blue-500">
-              <div className="font-medium">Luật 4:</div>
-              <div className="text-sm text-gray-700">
-                Nếu Số người cao &rarr; Ventilation = High
-              </div>
-            </div>
-            <div className="p-3 bg-blue-50 rounded border-l-4 border-l-blue-500">
-              <div className="font-medium">Luật 5:</div>
-              <div className="text-sm text-gray-700">
-                Nếu PM2.5 cao &rarr; Ventilation = High
-              </div>
-            </div>
-            <div className="p-3 bg-blue-50 rounded border-l-4 border-l-blue-500">
-              <div className="font-medium">Luật 6:</div>
-              <div className="text-sm text-gray-700">
-                Nếu (CO2 trung bình HOẶC Số người trung bình) &rarr; Ventilation = Medium
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Membership Functions */}
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">📊 Membership Functions</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <h4 className="font-bold mb-2">CO2 (0-2000 ppm)</h4>
-              <ul className="text-sm space-y-1">
-                <li>🟢 Low: 0-800 ppm</li>
-                <li>🟡 Medium: 600-1800 ppm</li>
-                <li>🔴 High: 1000-2000 ppm</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-bold mb-2">PM2.5 (0-200 µg/m³)</h4>
-              <ul className="text-sm space-y-1">
-                <li>🟢 Low: 0-35 µg/m³</li>
-                <li>🟡 Medium: 25-100 µg/m³</li>
-                <li>🔴 High: 75-200 µg/m³</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-bold mb-2">Humidity (0-100%)</h4>
-              <ul className="text-sm space-y-1">
-                <li>🟢 Low: 0-40%</li>
-                <li>🟡 Normal: 35-70%</li>
-                <li>🔴 High: 65-100%</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-bold mb-2">Occupancy (0-60 people)</h4>
-              <ul className="text-sm space-y-1">
-                <li>🟢 Low: 0-15 người</li>
-                <li>🟡 Medium: 10-45 người</li>
-                <li>🔴 High: 35-60 người</li>
-              </ul>
-            </div>
-          </div>
         </div>
       </div>
+
+      {/* Rule base */}
+      <section className="card">
+        <p className="text-sm font-semibold text-slate-700 mb-4">Cơ sở luật</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {RULES.map((r) => (
+            <div key={r.id} className={`border-l-[3px] rounded-lg px-4 py-3 ${RULE_STYLE[r.level]}`}>
+              <div className="flex items-start gap-2">
+                <span className="num text-xs font-bold text-slate-400 mt-0.5 shrink-0 w-5">R{r.id}</span>
+                <div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    <span className="font-semibold text-slate-800">IF </span>{r.condition}
+                  </p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1">→ {r.output}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Membership functions */}
+      <section className="card">
+        <p className="text-sm font-semibold text-slate-700 mb-4">Membership Functions</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+          {MF_TABLE.map((v) => (
+            <div key={v.var}>
+              <p className="text-xs font-semibold text-slate-600 mb-2.5">{v.var}</p>
+              <div className="space-y-2">
+                {v.sets.map((s) => (
+                  <div key={s.label} className="flex items-center justify-between gap-2">
+                    <span className={`badge ${s.c} shrink-0`}>{s.label}</span>
+                    <span className="num text-xs text-slate-500">{s.range}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
     </div>
   );
-};
-
-export default FuzzyDetails;
+}

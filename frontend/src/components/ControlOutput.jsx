@@ -1,160 +1,138 @@
 import React from 'react';
 
-const ControlOutput = ({ control, loading }) => {
+const FAN_LABEL = { Off: 'Dừng', Low: 'Thấp', Medium: 'Vừa', High: 'Cao' };
+const FAN_STYLE = {
+  Off:    'bg-slate-100 text-slate-600',
+  Low:    'bg-emerald-100 text-emerald-700',
+  Medium: 'bg-amber-100 text-amber-700',
+  High:   'bg-red-100 text-red-700',
+};
+const barColor = (v) => v < 30 ? 'bg-emerald-500' : v < 65 ? 'bg-amber-500' : 'bg-red-500';
+
+function Sk({ h = 'h-4', w = 'w-full' }) {
+  return <div className={`skeleton ${h} ${w}`} />;
+}
+
+export default function ControlOutput({ control, loading }) {
   if (loading) {
     return (
-      <div className="card">
-        <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-          <div className="h-8 bg-gray-200 rounded"></div>
+      <div className="space-y-4">
+        <div className="card space-y-3">
+          <Sk h="h-3" w="w-1/3" />
+          <Sk h="h-2.5" />
+          <Sk h="h-3" w="w-1/4" />
+        </div>
+        <div className="card space-y-2.5">
+          <Sk h="h-3" w="w-2/5" />
+          <Sk h="h-3.5" />
+          <Sk h="h-3.5" w="w-5/6" />
         </div>
       </div>
     );
   }
 
   if (!control) {
-    return <div className="card">Chưa có dữ liệu điều khiển</div>;
+    return (
+      <div className="card py-10 text-center text-sm text-slate-400">
+        Chưa có dữ liệu điều khiển
+      </div>
+    );
   }
 
-  const getFanColor = () => {
-    switch(control.fan_status) {
-      case 'Off': return 'bg-gray-200';
-      case 'Low': return 'bg-blue-300';
-      case 'Medium': return 'bg-yellow-300';
-      case 'High': return 'bg-red-400';
-      default: return 'bg-gray-200';
-    }
-  };
-
-  const getFanIcon = () => {
-    switch(control.fan_status) {
-      case 'Off': return '🔴 Tắt';
-      case 'Low': return '🟢 Mức thấp';
-      case 'Medium': return '🟡 Mức trung bình';
-      case 'High': return '🔴 Mức cao';
-      default: return 'Unknown';
-    }
-  };
+  const level     = control.ventilation_level ?? 0;
+  const fanStyle  = FAN_STYLE[control.fan_status] ?? FAN_STYLE.Off;
+  const fanLabel  = FAN_LABEL[control.fan_status] ?? 'Không rõ';
 
   return (
-    <div className="space-y-6">
-      {/* Ventilation Level Display */}
+    <div className="space-y-3 fade-in">
+      {/* Fan level card */}
       <div className="card">
-        <h3 className="text-lg font-bold mb-4">Mức thông gió hiện tại</h3>
-        <div className="flex items-center space-x-6">
-          <div className="flex-1">
-            <div className="w-full bg-gray-200 rounded-full h-8">
-              <div
-                className="bg-gradient-to-r from-blue-500 to-green-500 h-8 rounded-full transition-all"
-                style={{ width: `${control.ventilation_level}%` }}
-              />
-            </div>
-            <div className="mt-2 text-2xl font-bold text-blue-600">
-              {(control?.ventilation_level ?? 0).toFixed(1)}/100
-            </div>
-          </div>
-          <div className={`${getFanColor()} rounded-lg p-6 text-center min-w-max`}>
-            <div className="text-3xl mb-2">🌀</div>
-            <div className="font-bold">{getFanIcon()}</div>
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-slate-700">Mức thông gió</p>
+          <span className={`badge text-xs font-semibold px-2.5 py-1 rounded-full ${fanStyle}`}>
+            Quạt — {fanLabel}
+          </span>
+        </div>
+        <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-2">
+          <div
+            className={`h-2 rounded-full progress-bar ${barColor(level)}`}
+            style={{ width: `${Math.min(100, level)}%` }}
+          />
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-xs text-slate-400">0%</span>
+          <span className="num text-xs font-semibold text-slate-700">{level.toFixed(1)}%</span>
+          <span className="text-xs text-slate-400">100%</span>
         </div>
       </div>
 
       {/* Explanation */}
-      <div className="card border-l-4 border-l-blue-500">
-        <h3 className="text-lg font-bold mb-2">Giải thích quyết định</h3>
-        <p className="text-gray-700 leading-relaxed">
-          {control.explanation}
-        </p>
+      <div className="card bg-slate-50/80 border-slate-200">
+        <p className="text-xs text-slate-400 mb-1.5">Lý do quyết định</p>
+        <p className="text-sm text-slate-700 leading-relaxed">{control.explanation}</p>
       </div>
 
-      {/* Active Rules */}
+      {/* Active rules */}
       <div className="card">
-        <h3 className="text-lg font-bold mb-4">Luật đang kích hoạt ({control.rule_count})</h3>
-        <div className="space-y-2">
-          {control.active_rules && control.active_rules.length > 0 ? (
-            control.active_rules.map((rule, idx) => (
-              <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                <span className="text-sm font-medium">
-                  {rule.output} (Độ mạnh: {((rule?.strength ?? 0) * 100).toFixed(0)}%)
-                </span>
-                <div className="w-24 bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-500 h-2 rounded-full transition-all"
-                    style={{ width: `${rule.strength * 100}%` }}
-                  />
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-slate-700">Luật đang kích hoạt</p>
+          <span className="badge badge-teal">{control.rule_count} luật</span>
+        </div>
+        {control.active_rules?.length > 0 ? (
+          <div className="space-y-3">
+            {control.active_rules.map((rule, idx) => (
+              <div key={idx} className="flex items-center gap-3">
+                <span className="num text-xs text-slate-400 w-4 shrink-0 text-right">{idx + 1}</span>
+                <div className="flex-1">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs font-medium text-slate-700">{rule.output}</span>
+                    <span className="num text-xs text-slate-500">{((rule.strength ?? 0) * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-1.5">
+                    <div
+                      className="bg-teal-500 h-1.5 rounded-full progress-bar"
+                      style={{ width: `${(rule.strength ?? 0) * 100}%` }}
+                    />
+                  </div>
                 </div>
               </div>
-            ))
-          ) : (
-            <p className="text-gray-500">Không có luật nào được kích hoạt</p>
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">Không có luật nào được kích hoạt</p>
+        )}
       </div>
 
-      {/* Fuzzification Details */}
-      <div className="card">
-        <h3 className="text-lg font-bold mb-4">Chi tiết Fuzzification</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {control.fuzzification && (
-            <>
-              {/* CO2 */}
-              <div className="p-3 bg-blue-50 rounded">
-                <div className="font-medium text-sm text-gray-700 mb-2">CO2</div>
-                <div className="space-y-1 text-xs">
-                  {control.fuzzification.co2 && Object.entries(control.fuzzification.co2).map(([key, val]) => (
-                    <div key={key} className="flex justify-between">
-                      <span>{key}:</span>
-                      <span className="font-mono">{((val ?? 0) * 100).toFixed(1)}%</span>
-                    </div>
-                  ))}
+      {/* Fuzzification breakdown */}
+      {control.fuzzification && (
+        <div className="card">
+          <p className="text-sm font-semibold text-slate-700 mb-3">Chi tiết Fuzzification</p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {[
+              { key: 'co2',       label: 'CO₂',      cls: 'bg-blue-50 border-blue-100'    },
+              { key: 'pm25',      label: 'PM2.5',    cls: 'bg-red-50 border-red-100'      },
+              { key: 'humidity',  label: 'Độ ẩm',    cls: 'bg-emerald-50 border-emerald-100' },
+              { key: 'occupancy', label: 'Số người', cls: 'bg-amber-50 border-amber-100'  },
+            ].map(({ key, label, cls }) =>
+              control.fuzzification[key] ? (
+                <div key={key} className={`border rounded-lg p-3 ${cls}`}>
+                  <p className="text-xs font-medium text-slate-600 mb-2">{label}</p>
+                  <div className="space-y-1">
+                    {Object.entries(control.fuzzification[key]).map(([k, val]) => (
+                      <div key={k} className="flex justify-between text-xs">
+                        <span className="text-slate-500">{k}</span>
+                        <span className="num font-medium text-slate-700">
+                          {((val ?? 0) * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              {/* PM2.5 */}
-              <div className="p-3 bg-red-50 rounded">
-                <div className="font-medium text-sm text-gray-700 mb-2">PM2.5</div>
-                <div className="space-y-1 text-xs">
-                  {control.fuzzification.pm25 && Object.entries(control.fuzzification.pm25).map(([key, val]) => (
-                    <div key={key} className="flex justify-between">
-                      <span>{key}:</span>
-                      <span className="font-mono">{((val ?? 0) * 100).toFixed(1)}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Humidity */}
-              <div className="p-3 bg-green-50 rounded">
-                <div className="font-medium text-sm text-gray-700 mb-2">Độ ẩm</div>
-                <div className="space-y-1 text-xs">
-                  {control.fuzzification.humidity && Object.entries(control.fuzzification.humidity).map(([key, val]) => (
-                    <div key={key} className="flex justify-between">
-                      <span>{key}:</span>
-                      <span className="font-mono">{((val ?? 0) * 100).toFixed(1)}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Occupancy */}
-              <div className="p-3 bg-yellow-50 rounded">
-                <div className="font-medium text-sm text-gray-700 mb-2">Số người</div>
-                <div className="space-y-1 text-xs">
-                  {control.fuzzification.occupancy && Object.entries(control.fuzzification.occupancy).map(([key, val]) => (
-                    <div key={key} className="flex justify-between">
-                      <span>{key}:</span>
-                      <span className="font-mono">{((val ?? 0) * 100).toFixed(1)}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+              ) : null
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
-};
-
-export default ControlOutput;
+}

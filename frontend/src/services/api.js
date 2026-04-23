@@ -1,15 +1,18 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000, // 30s — ARIMA prediction can take time
 });
 
 export const apiClient = {
   // Get current data
   getCurrentData: () => api.get('/current-data'),
+
+  // Get predicted values
+  getPredictions: () => api.get('/predictions'),
   
   // Get historical data
   getDataHistory: (count = 20) => api.get(`/data-history/${count}`),

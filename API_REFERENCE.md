@@ -25,6 +25,7 @@ GET /api/health
 ```
 
 ### Get System Info
+
 ```
 GET /api/system-info
 ```
