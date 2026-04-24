@@ -1,6 +1,6 @@
 # 🏫 Hệ thống Giám sát Chất lượng Không khí trong Phòng học
 
-> Giám sát môi trường thời gian thực + Điều khiển thiết bị IoT bằng **Fuzzy Logic Control** qua MQTT
+> Giám sát môi trường thời gian thực + Dự đoán bằng **ARIMA** + Điều khiển thiết bị IoT bằng **Hybrid Fuzzy Logic Control** qua MQTT
 
 ---
 
@@ -9,6 +9,8 @@
 - [Tổng quan](#tổng-quan)
 - [Kiến trúc hệ thống](#kiến-trúc-hệ-thống)
 - [Tính năng](#tính-năng)
+- [Dự đoán ARIMA](#dự-đoán-arima)
+- [Hybrid Fuzzy Logic Control](#hybrid-fuzzy-logic-control)
 - [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
 - [Cài đặt](#cài-đặt)
 - [Chạy ứng dụng](#chạy-ứng-dụng)
@@ -26,8 +28,8 @@ Hệ thống bao gồm 3 tầng chính:
 
 | Tầng | Công nghệ | Vai trò |
 |------|-----------|---------|
-| **Frontend** | React + Vite + Tailwind | Dashboard giám sát & điều khiển |
-| **Backend** | FastAPI + Python | Fuzzy Logic, MQTT broker, REST API |
+| **Frontend** | React + Vite + Tailwind | Dashboard giám sát, dự đoán & điều khiển |
+| **Backend** | FastAPI + Python | ARIMA Prediction, Hybrid Fuzzy Logic, MQTT, REST API |
 | **IoT** | ESP32 + MQTT | Nhận lệnh, điều khiển LED/thiết bị thực |
 
 ### Các chỉ số được theo dõi
@@ -52,11 +54,13 @@ CSV Dataset
     │
     ▼
 Backend (FastAPI)
-    ├── DataService       — đọc từng hàng CSV mỗi 5s
-    ├── FuzzyController   — tính mức thông gió (0–100%)
-    ├── AlertChecker      — so sánh ngưỡng, tạo cảnh báo
-    ├── IoTController     — gửi lệnh qua MQTT
-    └── REST API          — cung cấp dữ liệu cho Frontend
+    ├── DataService           — đọc từng hàng CSV mỗi 5s
+    ├── ARIMA Predictor       — dự đoán 8 chỉ số trong 5 phút tới ⭐ NEW
+    ├── FuzzyController       — tính mức thông gió (0–100%)
+    ├── HybridFuzzyController — kết hợp hiện tại + dự đoán → quyết định chủ động ⭐ NEW
+    ├── AlertChecker          — so sánh ngưỡng, tạo cảnh báo
+    ├── IoTController         — gửi lệnh qua MQTT
+    └── REST API              — cung cấp dữ liệu cho Frontend
           │
           ▼
     MQTT Broker (Mosquitto :1883)
@@ -79,12 +83,26 @@ Backend (FastAPI)
 - Cập nhật tự động mỗi **5 giây**
 - Biểu đồ CO2 & PM2.5, Nhiệt độ & Độ ẩm (20 điểm gần nhất)
 - Panel cảnh báo realtime
+- ⭐ **Panel dự đoán**: Hiển thị giá trị dự đoán 5 phút tới cho tất cả chỉ số
+
+### Dự đoán ARIMA ⭐ MỚI
+- Sử dụng mô hình **ARIMA(2,1,2)** huấn luyện trên toàn bộ dataset
+- Dự đoán 8 chỉ số môi trường trong **5 phút tới**: CO2, PM2.5, PM10, Humidity, Temperature, Occupancy, TVOC, CO
+- Kết hợp baseline ARIMA (45%) + giá trị hiện tại (35%) + trung bình gần đây (20%) + xu hướng ngắn hạn (80%) để điều chỉnh dự đoán
+- Cập nhật liên tục theo dòng dữ liệu mới
+
+### Hybrid Fuzzy Logic Control ⭐ MỚI
+- Kết hợp **Fuzzy Logic hiện tại** + **Fuzzy Logic dự đoán** → Quyết định chủ động (Proactive)
+- Chiến lược: `MAX(ventilation_hiện_tại, ventilation_dự_đoán)` — bật quạt **trước** khi không khí xấu
+- Phát hiện thay đổi lớn (>15%) và tạo cảnh báo sớm
+- Tự động điều khiển IoT dựa trên quyết định hybrid
 
 ### Điều khiển IoT
-- **Chế độ Tự động**: Fuzzy Logic tự gửi lệnh MQTT mỗi 5 giây
+- **Chế độ Tự động**: Hybrid Fuzzy Logic tự gửi lệnh MQTT mỗi 5 giây
 - **Chế độ Thủ công**: Người dùng điều khiển trực tiếp quạt/đèn/cửa
 - Slider tốc độ quạt 0–100% + preset Tắt / Low / Med / Max
 - Trạng thái kết nối MQTT realtime
+- ⭐ **Proactive Control**: Mở cửa nếu CO2 hiện tại **hoặc** CO2 dự đoán > 1000 ppm
 
 ### Fuzzy Logic Control
 - Input: CO2, PM2.5, Độ ẩm, Số người
@@ -102,7 +120,7 @@ Backend (FastAPI)
 
 ### Backend
 - Python **3.9+**
-- `fastapi`, `uvicorn`, `pandas`, `numpy`, `paho-mqtt`
+- `fastapi`, `uvicorn`, `pandas`, `numpy`, `paho-mqtt`, `statsmodels` (ARIMA)
 
 ### Frontend
 - Node.js **16+**
@@ -187,11 +205,12 @@ HTTM/
 ├── frontend/
 │   └── src/
 │       ├── components/
-│       │   ├── StatCard.jsx       # Thẻ chỉ số
-│       │   ├── AlertPanel.jsx     # Panel cảnh báo
-│       │   ├── Chart.jsx          # Biểu đồ Recharts
-│       │   ├── ControlOutput.jsx  # Kết quả Fuzzy
-│       │   └── IoTControl.jsx     # Điều khiển thiết bị
+│       │   ├── StatCard.jsx         # Thẻ chỉ số (hiện tại + dự đoán)
+│       │   ├── PredictionPanel.jsx  # ⭐ Panel dự đoán ARIMA
+│       │   ├── AlertPanel.jsx       # Panel cảnh báo
+│       │   ├── Chart.jsx            # Biểu đồ Recharts
+│       │   ├── ControlOutput.jsx    # Kết quả Fuzzy
+│       │   └── IoTControl.jsx       # Điều khiển thiết bị
 │       └── pages/
 │           ├── Dashboard.jsx
 │           ├── Charts.jsx
@@ -201,23 +220,26 @@ HTTM/
 │           └── About.jsx
 │
 ├── backend/
-│   ├── main.py                    # FastAPI app + auto-loop thread
+│   ├── main.py                      # FastAPI app + auto-loop thread + hybrid control
 │   ├── fuzzy/
-│   │   └── fuzzy_controller.py    # Fuzzy Logic (fuzzify→rules→defuzzify)
+│   │   ├── fuzzy_controller.py      # Fuzzy Logic (fuzzify→rules→defuzzify)
+│   │   └── hybrid_controller.py     # ⭐ Hybrid Fuzzy (hiện tại + dự đoán)
+│   ├── models/
+│   │   └── lstm_predictor.py        # ⭐ ARIMA Predictor (SimpleARIMAPredictor)
 │   ├── services/
-│   │   └── data_service.py        # Đọc CSV tuần tự
+│   │   └── data_service.py          # Đọc CSV + dự đoán 5 phút tới
 │   ├── utils/
-│   │   ├── alert_checker.py       # Kiểm tra ngưỡng cảnh báo
-│   │   └── iot_controller.py      # MQTT client (paho)
+│   │   ├── alert_checker.py         # Kiểm tra ngưỡng cảnh báo
+│   │   └── iot_controller.py        # MQTT client (paho)
 │   └── requirements.txt
 │
 ├── esp32/
 │   ├── main_mqtt/
-│   │   └── main_mqtt.ino          # Firmware ESP32 chính
-│   └── test_led.ino               # Test LED lúc cài đặt
+│   │   └── main_mqtt.ino            # Firmware ESP32 chính
+│   └── test_led.ino                 # Test LED lúc cài đặt
 │
 ├── data/
-│   └── dataset.csv                # 1000 bản ghi mẫu
+│   └── dataset.csv                  # 1000 bản ghi mẫu
 │
 └── README.md
 ```
@@ -247,13 +269,15 @@ HTTM/
 { "device": "fan", "speed": 75, "running": true, "level": "high" }
 ```
 
-### Logic điều khiển tự động
+### Logic điều khiển tự động (Hybrid — v2.0)
 
 ```
-Quạt  : speed = ventilation_level (0–100%) từ Fuzzy Logic
-Cửa   : mở khi CO2 > 1000 ppm
-Đèn   : bật khi occupancy_count > 0
+Quạt  : speed = MAX(fuzzy_hiện_tại, fuzzy_dự_đoán)  ← Proactive Control
+Cửa   : mở khi CO2_hiện_tại > 1000 ppm HOẶC CO2_dự_đoán > 1000 ppm
+Đèn   : bật khi occupancy > 0 (hiện tại HOẶC dự đoán)
 ```
+
+> ⭐ **Proactive Control**: Hệ thống dự đoán chất lượng không khí 5 phút tới và bật quạt/mở cửa **trước** khi môi trường thực sự xấu đi.
 
 ### GPIO ESP32
 
@@ -305,9 +329,15 @@ Cửa   : mở khi CO2 > 1000 ppm
 ### Dữ liệu
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | `/api/current-data` | Dữ liệu & Fuzzy output hiện tại |
+| GET | `/api/current-data` | Dữ liệu, Fuzzy output, dự đoán & hybrid decision |
 | GET | `/api/data-history/{count}` | N bản ghi gần nhất |
 | GET | `/api/all-data` | Toàn bộ dữ liệu (có phân trang) |
+
+### Dự đoán & Hybrid ⭐ MỚI
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/api/predictions` | Dự đoán ARIMA 5 phút tới (8 chỉ số) |
+| GET | `/api/hybrid-decision` | Quyết định Hybrid (hiện tại + dự đoán) |
 
 ### Cảnh báo & Điều khiển
 | Method | Endpoint | Mô tả |
@@ -372,5 +402,5 @@ Free for educational and research purposes.
 
 ---
 
-**Phiên bản**: 2.0.0  
+**Phiên bản**: 2.0.0 — ARIMA Prediction + Hybrid Fuzzy Logic Control  
 **Nhóm**: Nhóm 3
